@@ -8,6 +8,8 @@ import pytest
 
 from pikaraoke.lib.youtube_dl import (
     build_ytdl_download_command,
+    get_search_results,
+    get_stream_url,
     get_youtube_id_from_url,
     get_youtubedl_version,
     upgrade_youtubedl,
@@ -173,6 +175,38 @@ class TestBuildYtdlDownloadCommand:
             additional_args="--no-playlist",
         )
         assert cmd[-1] == "https://www.youtube.com/watch?v=test123"
+
+
+class TestSearchAndPreviewCommands:
+    def test_search_uses_additional_args(self):
+        output = b'{"title":"Song","url":"https://youtube.com/watch?v=abc","id":"abc"}\n'
+        with patch("pikaraoke.lib.youtube_dl.subprocess.check_output", return_value=output) as mock_check:
+            get_search_results("song", additional_args="--cookies /tmp/youtube-cookies.txt")
+
+        cmd = mock_check.call_args.args[0]
+        assert "--cookies" in cmd
+        assert "/tmp/youtube-cookies.txt" in cmd
+        assert cmd[-1] == 'ytsearch10:"song"'
+
+    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    def test_stream_url_uses_additional_args(self, mock_js):
+        result = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b"https://stream.example/video.mp4\n",
+            stderr=b"",
+        )
+        with patch("pikaraoke.lib.youtube_dl.subprocess.run", return_value=result) as mock_run:
+            stream_url = get_stream_url(
+                "https://www.youtube.com/watch?v=abc",
+                additional_args="--cookies /tmp/youtube-cookies.txt",
+            )
+
+        cmd = mock_run.call_args.args[0]
+        assert stream_url == "https://stream.example/video.mp4"
+        assert "--cookies" in cmd
+        assert "/tmp/youtube-cookies.txt" in cmd
+        assert cmd[-1] == "https://www.youtube.com/watch?v=abc"
 
 
 class TestGetYoutubedlVersion:

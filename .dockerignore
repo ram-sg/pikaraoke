@@ -5,6 +5,10 @@ code_quality
 docker
 Dockerfile*
 docker-compose*.yml
+.env
+.env.local
+data
+songs
 __pycache__
 *.pyc
 .venv*

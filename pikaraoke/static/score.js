@@ -1,6 +1,14 @@
-function getScoreData(scoreValue) {
+function getScoreData(scoreValue, scoreResult = null) {
   function randomPhrase(phrases) {
     return phrases[Math.floor(Math.random() * phrases.length)];
+  }
+
+  if (scoreResult && scoreResult.review) {
+    const applause =
+      scoreValue < 30 ? "applause-l.mp3" :
+      scoreValue < 60 ? "applause-m.mp3" :
+      "applause-h.mp3";
+    return { applause, review: scoreResult.review };
   }
 
   if (scoreValue < 30) {
@@ -12,7 +20,10 @@ function getScoreData(scoreValue) {
   }
 }
 
-function getScoreValue() {
+function getScoreValue(scoreResult = null) {
+  if (scoreResult && Number.isFinite(scoreResult.score)) {
+    return Math.max(0, Math.min(99, Math.floor(scoreResult.score)));
+  }
   const random = Math.random();
   const bias = 2; // adjust this value to control the bias
   const scoreValue = Math.pow(random, 1 / bias) * 99;
@@ -57,7 +68,7 @@ async function rotateScore(scoreTextElement, duration) {
   }
 }
 
-async function startScore(staticPath) {
+async function startScore(staticPath, scoreResult = null) {
   try {
     const r = await fetch(PikaraokeConfig.scorePhrasesUrl);
     scoreReviews = await r.json();
@@ -69,8 +80,8 @@ async function startScore(staticPath) {
   const scoreTextElement = $("#score-number-text");
   const scoreReviewElement = $("#score-review-text");
 
-  const scoreValue = getScoreValue();
-  const scoreData = getScoreData(scoreValue);
+  const scoreValue = getScoreValue(scoreResult);
+  const scoreData = getScoreData(scoreValue, scoreResult);
 
   const drums = new Audio(staticPath + "sounds/score-drums.mp3");
   // Pre-create applause audio NOW to capture the user activation window

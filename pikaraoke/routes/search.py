@@ -47,9 +47,9 @@ def search():
     if search_string:
         non_karaoke = request.args.get("non_karaoke") == "true"
         if non_karaoke:
-            search_results = get_search_results(search_string)
+            search_results = get_search_results(search_string, k.additional_ytdl_args)
         else:
-            search_results = get_search_results(search_string + " karaoke")
+            search_results = get_search_results(search_string + " karaoke", k.additional_ytdl_args)
     else:
         search_string = None
         search_results = None
@@ -87,7 +87,8 @@ def autocomplete(query):
 @search_bp.arguments(PreviewQuery, location="query")
 def preview(query):
     """Get a direct stream URL for previewing a YouTube video."""
-    stream_url = get_stream_url(query["url"])
+    k = get_karaoke_instance()
+    stream_url = get_stream_url(query["url"], k.additional_ytdl_args)
     if stream_url is None:
         return jsonify({"error": "Could not fetch stream URL"}), 500
     return jsonify({"stream_url": stream_url})

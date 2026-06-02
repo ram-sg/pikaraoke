@@ -7,9 +7,12 @@ __pycache__/
 dist/
 build/
 songs/
+data/
 qrcode.png
 .DS_Store
 *.ini
+.env
+.env.local
 docker-compose.yml
 /.idea/
 .coverage

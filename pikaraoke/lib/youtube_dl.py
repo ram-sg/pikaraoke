@@ -21,6 +21,12 @@ def _js_runtime_args() -> list[str]:
     return []
 
 
+def _append_additional_args(cmd: list[str], additional_args: str | None) -> list[str]:
+    if additional_args:
+        cmd += shlex.split(additional_args)
+    return cmd
+
+
 def get_youtubedl_version() -> str:
     """Get the installed yt-dlp version.
 
@@ -148,17 +154,17 @@ def build_ytdl_download_command(
     cmd = yt_dlp_cmd + args + _js_runtime_args()
     if youtubedl_proxy:
         cmd += ["--proxy", youtubedl_proxy]
-    if additional_args:
-        cmd += shlex.split(additional_args)
+    _append_additional_args(cmd, additional_args)
     cmd += [video_url]
     return cmd
 
 
-def get_search_results(query: str) -> list[list[str]]:
+def get_search_results(query: str, additional_args: str | None = None) -> list[list[str]]:
     """Search YouTube for videos matching the query.
 
     Args:
         query: Search query string.
+        additional_args: Optional additional command-line arguments as a string.
 
     Returns:
         List of [title, url, video_id, channel, duration] for each result.
@@ -167,7 +173,9 @@ def get_search_results(query: str) -> list[list[str]]:
     logging.info(f"Searching YouTube for: {query}")
     num_results = 10
     yt_search = f'ytsearch{num_results}:"{query}"'
-    cmd = yt_dlp_cmd + ["-j", "--no-playlist", "--flat-playlist", yt_search]
+    cmd = yt_dlp_cmd + ["-j", "--no-playlist", "--flat-playlist"]
+    _append_additional_args(cmd, additional_args)
+    cmd += [yt_search]
     logging.debug(f"yt-dlp search command: {' '.join(cmd)}")
     try:
         output = subprocess.check_output(cmd).decode("utf-8", "ignore")
@@ -192,16 +200,18 @@ def get_search_results(query: str) -> list[list[str]]:
         raise
 
 
-def get_stream_url(video_url: str) -> str | None:
+def get_stream_url(video_url: str, additional_args: str | None = None) -> str | None:
     """Get a direct stream URL for a YouTube video without downloading it.
 
     Args:
         video_url: YouTube video URL.
+        additional_args: Optional additional command-line arguments as a string.
 
     Returns:
         Direct playable stream URL, or None if yt-dlp failed.
     """
     cmd = yt_dlp_cmd + ["-g", "-f", "worst[ext=mp4]/worst"] + _js_runtime_args()
+    _append_additional_args(cmd, additional_args)
     cmd += [video_url]
     logging.debug(f"yt-dlp get stream URL command: {' '.join(cmd)}")
     try:

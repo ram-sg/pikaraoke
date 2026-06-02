@@ -47,6 +47,12 @@ from pikaraoke.routes.now_playing import nowplaying_bp
 from pikaraoke.routes.preferences import preferences_bp
 from pikaraoke.routes.queue import queue_bp
 from pikaraoke.routes.search import search_bp
+from pikaraoke.routes.score import score_bp
+from pikaraoke.routes.site_auth import (
+    require_site_auth,
+    site_auth_bp,
+    site_auth_config_from_env,
+)
 from pikaraoke.routes.socket_events import setup_socket_events
 from pikaraoke.routes.splash import splash_bp
 from pikaraoke.routes.stream import stream_bp
@@ -65,6 +71,8 @@ app.secret_key = os.urandom(24)
 app.jinja_env.add_extension("jinja2.ext.i18n")
 app.config["BABEL_TRANSLATION_DIRECTORIES"] = "translations"
 app.config["JSON_SORT_KEYS"] = False
+app.config["SITE_NAME"] = "PiKaraoke"
+app.config.update(site_auth_config_from_env())
 
 # Always initialize flask-smorest Api for error handling (@bp.arguments validation).
 # Only expose the Swagger UI when --enable-swagger is passed.
@@ -102,6 +110,8 @@ _internal_blueprints = [
     info_bp,
     splash_bp,
     batch_song_renamer_bp,
+    site_auth_bp,
+    score_bp,
 ]
 
 for bp in _api_blueprints:
@@ -109,6 +119,8 @@ for bp in _api_blueprints:
 
 for bp in _internal_blueprints:
     app.register_blueprint(bp)
+
+app.before_request(require_site_auth)
 
 
 def get_locale() -> str | None:
@@ -270,7 +282,6 @@ def main() -> None:
 
     # expose shared configuration variables to the flask app
     app.config["ADMIN_PASSWORD"] = args.admin_password
-    app.config["SITE_NAME"] = "PiKaraoke"
 
     # Expose some functions to jinja templates
     app.jinja_env.globals.update(filename_from_path=k.song_manager.display_name_from_path)

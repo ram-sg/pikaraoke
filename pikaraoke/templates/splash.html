@@ -23,8 +23,9 @@
       socketConnectionLost: "{{ _('Connection lost. Is the server still running?') }}",
       unsupportedBrowser: "{{ _('This browser is not fully supported. You may experience streaming issues. Please use Chrome/Safari/Firefox/Edge for best results.') }}",
     },
-    scorePhrasesUrl: "{{ url_for('splash.get_score_phrases') }}",
-  };
+	    scorePhrasesUrl: "{{ url_for('splash.get_score_phrases') }}",
+	    scoreAnalyzeUrl: "{{ url_for('score.analyze_score') }}",
+	  };
 </script>
 <script src="{{ url_for('static', filename='js/splash.js') }}"></script>
 {% endblock %} {% block body %}

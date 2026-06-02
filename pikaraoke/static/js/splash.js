@@ -25,6 +25,11 @@ let scoreReviews = {
 let isMaster = false;
 let uiScale = null;
 let clockIntervalId = null;
+let scoreMediaStream = null;
+let scoreRecorder = null;
+let scoreChunks = [];
+let scoreRecordingMeta = null;
+let scoreCaptureReady = false;
 
 // Browser detection
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -94,6 +99,7 @@ const testAutoplayCapability = async () => {
 const handleConfirmation = () => {
   $('#permissions-modal').removeClass('is-active');
   autoplayConfirmed = true;
+  setupScoreCapture();
   updateBackgroundMediaState(true);
   loadNowPlaying();
 };
@@ -102,10 +108,114 @@ const hideVideo = () => {
   $("#video-container").hide();
 }
 
+const getScoreMimeType = () => {
+  const types = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4",
+  ];
+  if (!window.MediaRecorder) return "";
+  return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+}
+
+const setupScoreCapture = async () => {
+  if (scoreCaptureReady || PikaraokeConfig.disableScore) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+    console.log("Microphone scoring is not supported in this browser.");
+    return;
+  }
+  try {
+    scoreMediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: false,
+      },
+      video: false,
+    });
+    scoreCaptureReady = true;
+  } catch (e) {
+    console.log("Microphone permission not granted; real scoring disabled.", e);
+  }
+}
+
+const startScoreCapture = () => {
+  if (!isMaster || PikaraokeConfig.disableScore || !scoreMediaStream) return;
+  if (scoreRecorder && scoreRecorder.state === "recording") return;
+
+  scoreChunks = [];
+  scoreRecordingMeta = {
+    title: nowPlaying.now_playing || "",
+    duration: nowPlaying.now_playing_duration || "",
+    startedAt: Date.now(),
+  };
+
+  const mimeType = getScoreMimeType();
+  const options = mimeType ? { mimeType } : undefined;
+  try {
+    scoreRecorder = new MediaRecorder(scoreMediaStream, options);
+    scoreRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) scoreChunks.push(event.data);
+    };
+    scoreRecorder.start(1000);
+  } catch (e) {
+    console.log("Could not start microphone scoring.", e);
+  }
+}
+
+const uploadScoreRecording = async (blob) => {
+  const formData = new FormData();
+  const extension = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : "webm";
+  formData.append("audio", blob, `score-recording.${extension}`);
+  if (scoreRecordingMeta) {
+    formData.append("title", scoreRecordingMeta.title);
+    formData.append("duration", scoreRecordingMeta.duration);
+    formData.append("started_at", scoreRecordingMeta.startedAt);
+  }
+
+  const response = await fetch(PikaraokeConfig.scoreAnalyzeUrl, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Score analysis failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+const stopScoreCapture = async (analyze = false) => {
+  if (!scoreRecorder || scoreRecorder.state !== "recording") return null;
+
+  const recorder = scoreRecorder;
+  return new Promise((resolve) => {
+    recorder.onstop = async () => {
+      try {
+        const blob = new Blob(scoreChunks, { type: recorder.mimeType || "audio/webm" });
+        scoreRecorder = null;
+        if (!analyze || blob.size < 1024) {
+          resolve(null);
+          return;
+        }
+        resolve(await uploadScoreRecording(blob));
+      } catch (e) {
+        console.log("Score upload failed; falling back to entertainment score.", e);
+        resolve(null);
+      } finally {
+        scoreChunks = [];
+        scoreRecordingMeta = null;
+      }
+    };
+    recorder.stop();
+  });
+}
+
 const endSong = async (reason = null, showScore = false) => {
+  const realScore = await stopScoreCapture(showScore && !PikaraokeConfig.disableScore);
   if (showScore && !PikaraokeConfig.disableScore) {
     isScoreShown = true;
-    await startScore("/static/");
+    await startScore("/static/", realScore);
     isScoreShown = false;
   }
   currentVideoUrl = null;
@@ -435,6 +545,7 @@ const setupVideoPlayer = () => {
   const video = getVideoPlayer();
   video.addEventListener("play", () => {
     $("#video-container").show();
+    startScoreCapture();
     if (isMaster) {
       setTimeout(() => { socket.emit("start_song") }, 1200);
     }
@@ -587,6 +698,7 @@ const setupSocketEvents = () => {
     }
   });
   socket.on('skip', (reason) => {
+    stopScoreCapture(false);
     const video = getVideoPlayer();
     const currVolume = video.volume;
     if (isMediaPlaying(video)) {

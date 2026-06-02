@@ -1,25 +1,44 @@
-version: '3.8'
-
 services:
   pikaraoke:
     # --- BUILD OPTION ---
-    # To build locally, uncomment the build section:
-    # build:
-    #   context: .
-    #   dockerfile: build_scripts/docker/Dockerfile
+    # Build locally when testing changes from this checkout.
+    # Run docker compose from the repository root.
+    build:
+      context: .
+      dockerfile: build_scripts/docker/Dockerfile
 
     # --- IMAGE OPTION ---
-    # Default: Pulls the pre-built image from Docker Hub
-    image: vicwomg/pikaraoke:latest
+    # To use the pre-built image instead, remove the build section and uncomment:
+    # image: vicwomg/pikaraoke:latest
+    image: pikaraoke-local:latest
 
     container_name: PiKaraoke
+    environment:
+      PIKARAOKE_LOGIN: ${PIKARAOKE_LOGIN:-}
+      PIKARAOKE_PASSWORD: ${PIKARAOKE_PASSWORD:-}
+      PIKARAOKE_PUBLIC_URL: ${PIKARAOKE_PUBLIC_URL:-http://<YOUR_LAN_IP>:5555}
+      # Optional: pass extra yt-dlp args. For authenticated YouTube downloads,
+      # export youtube.com cookies to ./data/youtube-cookies.txt and set:
+      # PIKARAOKE_YTDL_ARGS=--cookies /home/pikaraoke/.pikaraoke/youtube-cookies.txt
+      PIKARAOKE_YTDL_ARGS: ${PIKARAOKE_YTDL_ARGS:-}
+      # Optional GPU scoring service URL. Leave empty to use the built-in CPU fallback.
+      PIKARAOKE_SCORING_SERVICE_URL: ${PIKARAOKE_SCORING_SERVICE_URL:-http://scoring:8765/analyze}
 
     # --- COMMAND CONFIGURATION ---
     # -u: Required for the QR code to work on other devices.
     #     Replace <YOUR_LAN_IP> with your computer's actual IP (e.g., 192.168.1.50)
     # --config-file-path: Ensures settings are saved to the mounted volume
-    command: >
-      -u http://<YOUR_LAN_IP>:5555
+    # For Cloudflare Tunnel, set PIKARAOKE_PUBLIC_URL in .env to your public
+    # https:// hostname after creating the tunnel route.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -- -d /app/pikaraoke-songs/ --headless -u "$${PIKARAOKE_PUBLIC_URL:-http://<YOUR_LAN_IP>:5555}"
+        if [ -n "$${PIKARAOKE_YTDL_ARGS:-}" ]; then
+          set -- "$$@" --ytdl-args "$${PIKARAOKE_YTDL_ARGS}"
+        fi
+        exec pikaraoke "$$@"
 
     # --- VOLUMES ---
     # The <local_directory>:<container_directory> format is used.
@@ -37,8 +56,8 @@ services:
 
     restart: unless-stopped
 
-    # Bridge mode is required for cross-platform compatibility (Win/Mac/Linux)
-    network_mode: bridge
+    networks:
+      - pikaraoke
 
     # Logging limits to prevent disk filling
     logging:
@@ -46,3 +65,52 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  scoring:
+    # GPU scoring service for real microphone-based scoring. Requires NVIDIA
+    # Container Toolkit on the host.
+    build:
+      context: .
+      dockerfile: build_scripts/docker/scoring.Dockerfile
+    image: pikaraoke-scoring:latest
+    container_name: PiKaraoke-Scoring
+    gpus: all
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    restart: unless-stopped
+    networks:
+      - pikaraoke
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cloudflared:
+    # Cloudflare Tunnel connector. Create a remotely-managed tunnel in the
+    # Cloudflare dashboard, then paste its token into CLOUDFLARED_TUNNEL_TOKEN
+    # in .env.
+    image: cloudflare/cloudflared:latest
+    container_name: PiKaraoke-Cloudflared
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN:-}
+    command: >
+      tunnel --no-autoupdate --protocol ${CLOUDFLARED_PROTOCOL:-http2} run
+    depends_on:
+      - pikaraoke
+    restart: unless-stopped
+    # Share PiKaraoke's network namespace so remotely-managed Cloudflare
+    # origins can use http://localhost:5555.
+    network_mode: "service:pikaraoke"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  pikaraoke:
+    driver: bridge
