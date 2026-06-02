@@ -10,7 +10,7 @@ import time
 import webbrowser
 from typing import TYPE_CHECKING
 
-from pikaraoke.lib.get_platform import (
+from biaoke.lib.get_platform import (
     get_data_directory,
     is_linux,
     is_macos,
@@ -18,7 +18,7 @@ from pikaraoke.lib.get_platform import (
 )
 
 if TYPE_CHECKING:
-    from pikaraoke.karaoke import Karaoke
+    from biaoke.karaoke import Karaoke
 
 
 class Browser:
@@ -184,4 +184,4 @@ class Browser:
             self.browser_process.wait()
             self.browser_process = None
         else:
-            logging.warning("Browser opened via system default cannot be closed by PiKaraoke.")
+            logging.warning("Browser opened via system default cannot be closed by Biaoke.")

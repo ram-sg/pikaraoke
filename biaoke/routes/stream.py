@@ -10,8 +10,8 @@ from flask_smorest import Blueprint
 
 _ = flask_babel.gettext
 
-from pikaraoke.lib.current_app import get_karaoke_instance
-from pikaraoke.lib.file_resolver import FileResolver, get_tmp_dir
+from biaoke.lib.current_app import get_karaoke_instance
+from biaoke.lib.file_resolver import FileResolver, get_tmp_dir
 
 stream_bp = Blueprint("stream", __name__)
 

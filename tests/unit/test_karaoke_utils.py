@@ -6,7 +6,7 @@ class TestConvertPreferenceValue:
 
     def test_convert_true_values(self):
         """Test conversion of truthy string values."""
-        from pikaraoke.lib.preference_manager import PreferenceManager
+        from biaoke.lib.preference_manager import PreferenceManager
 
         prefs = PreferenceManager()
         assert prefs._convert_value("true") is True
@@ -17,7 +17,7 @@ class TestConvertPreferenceValue:
 
     def test_convert_false_values(self):
         """Test conversion of falsy string values."""
-        from pikaraoke.lib.preference_manager import PreferenceManager
+        from biaoke.lib.preference_manager import PreferenceManager
 
         prefs = PreferenceManager()
         assert prefs._convert_value("false") is False
@@ -28,7 +28,7 @@ class TestConvertPreferenceValue:
 
     def test_convert_integer_values(self):
         """Test conversion of integer string values."""
-        from pikaraoke.lib.preference_manager import PreferenceManager
+        from biaoke.lib.preference_manager import PreferenceManager
 
         prefs = PreferenceManager()
         assert prefs._convert_value("42") == 42
@@ -37,7 +37,7 @@ class TestConvertPreferenceValue:
 
     def test_convert_float_values(self):
         """Test conversion of float string values."""
-        from pikaraoke.lib.preference_manager import PreferenceManager
+        from biaoke.lib.preference_manager import PreferenceManager
 
         prefs = PreferenceManager()
         assert prefs._convert_value("3.14") == 3.14
@@ -46,7 +46,7 @@ class TestConvertPreferenceValue:
 
     def test_convert_string_passthrough(self):
         """Test that non-special strings pass through unchanged."""
-        from pikaraoke.lib.preference_manager import PreferenceManager
+        from biaoke.lib.preference_manager import PreferenceManager
 
         prefs = PreferenceManager()
         assert prefs._convert_value("hello") == "hello"
@@ -55,7 +55,7 @@ class TestConvertPreferenceValue:
 
     def test_convert_non_string_passthrough(self):
         """Test that non-string values pass through unchanged."""
-        from pikaraoke.lib.preference_manager import PreferenceManager
+        from biaoke.lib.preference_manager import PreferenceManager
 
         prefs = PreferenceManager()
         assert prefs._convert_value(42) == 42

@@ -3,7 +3,7 @@
 from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
-from pikaraoke.lib.metadata_parser import regex_tidy, search_lastfm_tracks
+from biaoke.lib.metadata_parser import regex_tidy, search_lastfm_tracks
 
 metadata_bp = Blueprint("metadata", __name__)
 

@@ -1,5 +1,5 @@
 /**
- * SPA (Single Page Application) Navigation System for Pikaraoke
+ * SPA (Single Page Application) Navigation System for Biaoke
  * Enables dynamic content loading without full page refreshes
  */
 

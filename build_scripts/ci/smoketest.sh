@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# PiKaraoke Headless Mode Verification Script (Unix)
-# This script starts PiKaraoke in headless mode, waits for initialization,
+# Biaoke Headless Mode Verification Script (Unix)
+# This script starts Biaoke in headless mode, waits for initialization,
 # and verifies that key web endpoints are serving content.
 
 set -e
 
-echo "Installing PiKaraoke for CI..."
+echo "Installing Biaoke for CI..."
 ./build_scripts/install/install.sh -y --local
 
-echo "Starting PiKaraoke in headless mode..."
-pikaraoke --headless > output.log 2>&1 &
+echo "Starting Biaoke in headless mode..."
+biaoke --headless > output.log 2>&1 &
 PID=$!
 
 # Function to cleanup on exit
@@ -20,7 +20,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Waiting for PiKaraoke to initialize (max 30s)..."
+echo "Waiting for Biaoke to initialize (max 30s)..."
 INITIALIZED=false
 for i in {1..30}; do
     if grep -q "Connect the player host to:" output.log; then
@@ -32,7 +32,7 @@ for i in {1..30}; do
 done
 
 if [ "$INITIALIZED" = false ]; then
-    echo "Error: Timed out waiting for PiKaraoke to initialize."
+    echo "Error: Timed out waiting for Biaoke to initialize."
     cat output.log
     exit 1
 fi

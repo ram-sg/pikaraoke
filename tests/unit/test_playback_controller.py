@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.playback_controller import PlaybackController, PlaybackResult
-from pikaraoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.events import EventSystem
+from biaoke.lib.playback_controller import PlaybackController, PlaybackResult
+from biaoke.lib.preference_manager import PreferenceManager
 
 
 @pytest.fixture
@@ -67,8 +67,8 @@ class TestPlaybackControllerInit:
 class TestPlaybackControllerPlayFile:
     """Tests for PlaybackController.play_file method."""
 
-    @patch("pikaraoke.lib.playback_controller.os.path.isfile", return_value=True)
-    @patch("pikaraoke.lib.playback_controller.time.sleep")
+    @patch("biaoke.lib.playback_controller.os.path.isfile", return_value=True)
+    @patch("biaoke.lib.playback_controller.time.sleep")
     def test_play_file_success(self, mock_sleep, mock_isfile, test_prefs):
         """Test successful playback."""
         events = EventSystem()
@@ -98,8 +98,8 @@ class TestPlaybackControllerPlayFile:
         assert pc.now_playing_duration == 180
         assert pc.is_paused is False
 
-    @patch("pikaraoke.lib.playback_controller.os.path.isfile", return_value=True)
-    @patch("pikaraoke.lib.playback_controller.time.sleep")
+    @patch("biaoke.lib.playback_controller.os.path.isfile", return_value=True)
+    @patch("biaoke.lib.playback_controller.time.sleep")
     @patch("flask_babel._", side_effect=lambda x: x)
     def test_play_file_timeout(self, mock_gettext, mock_sleep, mock_isfile, test_prefs):
         """Test playback timeout when client never connects."""
@@ -124,7 +124,7 @@ class TestPlaybackControllerPlayFile:
         assert result.success is False
         assert result.error is not None
 
-    @patch("pikaraoke.lib.playback_controller.os.path.isfile", return_value=True)
+    @patch("biaoke.lib.playback_controller.os.path.isfile", return_value=True)
     def test_play_file_stream_failure(self, mock_isfile, test_prefs):
         """Test playback when stream setup fails."""
         events = EventSystem()
@@ -159,7 +159,7 @@ class TestPlaybackControllerMissingFile:
         assert "not found" in result.error
         pc.stream_manager.play_file.assert_not_called()
 
-    @patch("pikaraoke.lib.playback_controller.time.sleep")
+    @patch("biaoke.lib.playback_controller.time.sleep")
     def test_existing_file_proceeds_normally(self, mock_sleep, test_prefs, tmp_path):
         events = EventSystem()
         filename_fn = lambda x, remove_youtube_id=True: "Test Song"
@@ -198,8 +198,8 @@ class TestPlaybackControllerStartSong:
 class TestPlaybackControllerEndSong:
     """Tests for PlaybackController.end_song method."""
 
-    @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("biaoke.lib.playback_controller.time.sleep")
+    @patch("biaoke.lib.playback_controller.delete_tmp_dir")
     def test_end_song_cleans_up(self, mock_delete, mock_sleep, test_prefs):
         """Test that end_song cleans up resources."""
         events = EventSystem()
@@ -227,8 +227,8 @@ class TestPlaybackControllerEndSong:
 class TestPlaybackControllerSkip:
     """Tests for PlaybackController.skip method."""
 
-    @patch("pikaraoke.lib.playback_controller.time.sleep")
-    @patch("pikaraoke.lib.playback_controller.delete_tmp_dir")
+    @patch("biaoke.lib.playback_controller.time.sleep")
+    @patch("biaoke.lib.playback_controller.delete_tmp_dir")
     @patch("flask_babel._", side_effect=lambda x: x)
     def test_skip_when_playing(self, mock_gettext, mock_delete, mock_sleep, test_prefs):
         """Test skip when a song is playing."""

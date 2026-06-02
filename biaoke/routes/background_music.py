@@ -8,7 +8,7 @@ import flask_babel
 from flask import jsonify, send_file
 from flask_smorest import Blueprint
 
-from pikaraoke.lib.current_app import get_karaoke_instance
+from biaoke.lib.current_app import get_karaoke_instance
 
 _ = flask_babel.gettext
 

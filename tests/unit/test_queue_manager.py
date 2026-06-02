@@ -6,9 +6,9 @@ ensuring queue logic is correct and maintainable.
 
 import pytest
 
-from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.lib.queue_manager import QueueManager
+from biaoke.lib.events import EventSystem
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.queue_manager import QueueManager
 
 
 def extract_title(path: str, *args) -> str:
@@ -561,8 +561,8 @@ class TestQueueManagerHelpers:
         """is_song_in_queue should return False for non-queued songs."""
         assert queue_manager.is_song_in_queue("/songs/test---abc.mp4") is False
 
-    def test_is_user_limited_returns_false_for_pikaraoke_user(self, preferences, events):
-        """Pikaraoke system user should never be limited."""
+    def test_is_user_limited_returns_false_for_biaoke_user(self, preferences, events):
+        """Biaoke system user should never be limited."""
         preferences.set("limit_user_songs_by", 1)
         qm = QueueManager(
             preferences=preferences,
@@ -572,7 +572,7 @@ class TestQueueManagerHelpers:
             get_available_songs=lambda: [],
         )
 
-        assert qm.is_user_limited("Pikaraoke") is False
+        assert qm.is_user_limited("Biaoke") is False
         assert qm.is_user_limited("Randomizer") is False
 
     def test_is_user_limited_respects_limit(self, preferences, events):

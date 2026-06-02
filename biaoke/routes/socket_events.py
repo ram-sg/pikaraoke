@@ -1,10 +1,10 @@
-"""Socket.IO event handlers for PiKaraoke."""
+"""Socket.IO event handlers for Biaoke."""
 
 import logging
 
 from flask import request
 
-from pikaraoke.lib.current_app import get_karaoke_instance
+from biaoke.lib.current_app import get_karaoke_instance
 
 # Track connected splash screen clients and the elected master
 splash_connections = set()

@@ -45,7 +45,7 @@ def get_raspi_wifi_text(url: str) -> list[str]:
     """Get display text for RaspiWiFi access point connection info.
 
     Args:
-        url: The PiKaraoke URL to display for WiFi configuration.
+        url: The Biaoke URL to display for WiFi configuration.
 
     Returns:
         List of strings with WiFi network name and configuration URL.

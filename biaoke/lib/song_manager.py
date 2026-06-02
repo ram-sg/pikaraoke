@@ -6,11 +6,11 @@ import os
 import re
 from collections.abc import Callable
 
-from pikaraoke.lib.get_platform import is_windows
-from pikaraoke.lib.karaoke_database import KaraokeDatabase
-from pikaraoke.lib.library_scanner import build_song_record
-from pikaraoke.lib.metadata_parser import regex_tidy, youtube_id_suffix
-from pikaraoke.lib.song_list import SongList
+from biaoke.lib.get_platform import is_windows
+from biaoke.lib.karaoke_database import KaraokeDatabase
+from biaoke.lib.library_scanner import build_song_record
+from biaoke.lib.metadata_parser import regex_tidy, youtube_id_suffix
+from biaoke.lib.song_list import SongList
 
 # Characters illegal in Windows filenames
 _WINDOWS_ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*]')

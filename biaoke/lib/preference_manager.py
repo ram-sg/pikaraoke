@@ -10,7 +10,7 @@ from typing import Any
 
 from flask_babel import _
 
-from pikaraoke.lib.get_platform import get_data_directory
+from biaoke.lib.get_platform import get_data_directory
 
 
 class PreferenceManager:

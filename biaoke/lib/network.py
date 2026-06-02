@@ -1,4 +1,4 @@
-"""Network utilities for PiKaraoke."""
+"""Network utilities for Biaoke."""
 
 import logging
 import socket

@@ -19,49 +19,49 @@ from flask import Flask, request, session
 from flask_babel import Babel
 from flask_socketio import SocketIO
 
-from pikaraoke import VERSION, karaoke
-from pikaraoke.constants import LANGUAGES
-from pikaraoke.lib.args import parse_pikaraoke_args
-from pikaraoke.lib.browser import Browser
-from pikaraoke.lib.current_app import get_karaoke_instance
-from pikaraoke.lib.ffmpeg import is_ffmpeg_installed
-from pikaraoke.lib.file_resolver import delete_tmp_dir
-from pikaraoke.lib.get_platform import (
+from biaoke import VERSION, karaoke
+from biaoke.constants import LANGUAGES
+from biaoke.lib.args import parse_biaoke_args
+from biaoke.lib.browser import Browser
+from biaoke.lib.current_app import get_karaoke_instance
+from biaoke.lib.ffmpeg import is_ffmpeg_installed
+from biaoke.lib.file_resolver import delete_tmp_dir
+from biaoke.lib.get_platform import (
     get_data_directory,
     get_platform,
     has_js_runtime,
     is_windows,
 )
-from pikaraoke.lib.song_manager import SongManager
-from pikaraoke.lib.youtube_dl import upgrade_youtubedl
-from pikaraoke.routes.admin import admin_bp
-from pikaraoke.routes.background_music import background_music_bp
-from pikaraoke.routes.batch_song_renamer import batch_song_renamer_bp
-from pikaraoke.routes.controller import controller_bp
-from pikaraoke.routes.files import files_bp
-from pikaraoke.routes.home import home_bp
-from pikaraoke.routes.images import images_bp
-from pikaraoke.routes.info import info_bp
-from pikaraoke.routes.metadata_api import metadata_bp
-from pikaraoke.routes.now_playing import nowplaying_bp
-from pikaraoke.routes.preferences import preferences_bp
-from pikaraoke.routes.queue import queue_bp
-from pikaraoke.routes.search import search_bp
-from pikaraoke.routes.score import score_bp
-from pikaraoke.routes.site_auth import (
+from biaoke.lib.song_manager import SongManager
+from biaoke.lib.youtube_dl import upgrade_youtubedl
+from biaoke.routes.admin import admin_bp
+from biaoke.routes.background_music import background_music_bp
+from biaoke.routes.batch_song_renamer import batch_song_renamer_bp
+from biaoke.routes.controller import controller_bp
+from biaoke.routes.files import files_bp
+from biaoke.routes.home import home_bp
+from biaoke.routes.images import images_bp
+from biaoke.routes.info import info_bp
+from biaoke.routes.metadata_api import metadata_bp
+from biaoke.routes.now_playing import nowplaying_bp
+from biaoke.routes.preferences import preferences_bp
+from biaoke.routes.queue import queue_bp
+from biaoke.routes.search import search_bp
+from biaoke.routes.score import score_bp
+from biaoke.routes.site_auth import (
     require_site_auth,
     site_auth_bp,
     site_auth_config_from_env,
 )
-from pikaraoke.routes.socket_events import setup_socket_events
-from pikaraoke.routes.splash import splash_bp
-from pikaraoke.routes.stream import stream_bp
+from biaoke.routes.socket_events import setup_socket_events
+from biaoke.routes.splash import splash_bp
+from biaoke.routes.stream import stream_bp
 
 _ = flask_babel.gettext
 
 from gevent.pywsgi import WSGIServer
 
-args = parse_pikaraoke_args()
+args = parse_biaoke_args()
 socketio = SocketIO(async_mode="gevent", cors_allowed_origins=args.url)
 babel = Babel()
 
@@ -71,14 +71,14 @@ app.secret_key = os.urandom(24)
 app.jinja_env.add_extension("jinja2.ext.i18n")
 app.config["BABEL_TRANSLATION_DIRECTORIES"] = "translations"
 app.config["JSON_SORT_KEYS"] = False
-app.config["SITE_NAME"] = "PiKaraoke"
+app.config["SITE_NAME"] = "Biaoke"
 app.config.update(site_auth_config_from_env())
 
 # Always initialize flask-smorest Api for error handling (@bp.arguments validation).
 # Only expose the Swagger UI when --enable-swagger is passed.
 from flask_smorest import Api
 
-app.config["API_TITLE"] = "PiKaraoke API"
+app.config["API_TITLE"] = "Biaoke API"
 app.config["API_VERSION"] = VERSION
 app.config["OPENAPI_VERSION"] = "3.0.2"
 app.config["OPENAPI_URL_PREFIX"] = "/"
@@ -196,7 +196,7 @@ def compile_translations() -> None:
 
 
 def main() -> None:
-    """Main entry point for the PiKaraoke application.
+    """Main entry point for the Biaoke application.
 
     Initializes the Flask server, Karaoke engine, and splash screen.
     Blocks until the application is terminated.
@@ -204,16 +204,16 @@ def main() -> None:
     compile_translations()
     platform = get_platform()
 
-    args = parse_pikaraoke_args()
+    args = parse_biaoke_args()
 
     # --- LOGGING SETUP ---
     # Optional: Force the log file to go to AppData too, so you can debug installation issues
-    # log_path = os.path.join(get_data_directory(), 'pikaraoke.log')
+    # log_path = os.path.join(get_data_directory(), 'biaoke.log')
     # logging.basicConfig(filename=log_path, level=logging.INFO)
 
     if not is_ffmpeg_installed():
         logging.error(
-            "ffmpeg is not installed, which is required to run PiKaraoke. See: https://www.ffmpeg.org/"
+            "ffmpeg is not installed, which is required to run Biaoke. See: https://www.ffmpeg.org/"
         )
         sys.exit(1)
 
@@ -268,7 +268,7 @@ def main() -> None:
         app.config["KARAOKE_INSTANCE"] = k
 
     # Wire download events to SocketIO broadcasts with app context
-    from pikaraoke.lib.current_app import broadcast_event
+    from biaoke.lib.current_app import broadcast_event
 
     def _broadcast_in_context(event_name):
         def handler():

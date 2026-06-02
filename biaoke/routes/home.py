@@ -4,7 +4,7 @@ import flask_babel
 from flask import render_template
 from flask_smorest import Blueprint
 
-from pikaraoke.lib.current_app import get_karaoke_instance, get_site_name, is_admin
+from biaoke.lib.current_app import get_karaoke_instance, get_site_name, is_admin
 
 _ = flask_babel.gettext
 

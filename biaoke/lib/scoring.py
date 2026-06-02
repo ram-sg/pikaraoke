@@ -75,7 +75,7 @@ def analyze_upload_bytes(
         raise ScoreAnalysisError("Audio upload is too large")
 
     safe_suffix = suffix if suffix.startswith(".") and len(suffix) <= 12 else ".webm"
-    with tempfile.TemporaryDirectory(prefix="pikaraoke-score-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="biaoke-score-") as tmp:
         input_path = Path(tmp) / f"input{safe_suffix}"
         wav_path = Path(tmp) / "recording.wav"
         input_path.write_bytes(data)

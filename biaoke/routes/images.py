@@ -5,7 +5,7 @@ import flask_babel
 from flask import send_file
 from flask_smorest import Blueprint
 
-from pikaraoke.lib.current_app import get_karaoke_instance
+from biaoke.lib.current_app import get_karaoke_instance
 
 _ = flask_babel.gettext
 
@@ -21,6 +21,6 @@ def qrcode():
 
 @images_bp.route("/logo")
 def logo():
-    """Get the PiKaraoke logo image."""
+    """Get the Biaoke logo image."""
     k = get_karaoke_instance()
     return send_file(os.path.abspath(k.logo_path), mimetype="image/png")

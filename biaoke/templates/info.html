@@ -71,7 +71,7 @@
 
 			$("#shutdown-link").click(function (e) {
 				e.preventDefault();
-				// {# MSG: Confirmation text whe the user starts to turn off the machine running Pikaraoke. #}
+				// {# MSG: Confirmation text whe the user starts to turn off the machine running Biaoke. #}
 				if (window.confirm("{{ _('Are you sure you want to shut down?') }}")) {
 					location.href = this.href;
 				}
@@ -87,7 +87,7 @@
 
 			$("#restart-link").click(function (e) {
 				e.preventDefault();
-				// {# MSG: Confirmation text whe the user starts to reboot the machine running Pikaraoke. #}
+				// {# MSG: Confirmation text whe the user starts to reboot the machine running Biaoke. #}
 				if (window.confirm("{{ _('Are you sure you want to reboot?') }}")) {
 					location.href = this.href;
 				}
@@ -485,7 +485,7 @@
 
 		<div class="card">
 			<header class="card-header py-3 px-5">
-					{# MSG: Header of the information section about the computer running Pikaraoke. #}
+					{# MSG: Header of the information section about the computer running Biaoke. #}
 					<h3 class="m-0">{% trans %}System Info{% endtrans %}</h3>
 			</header>
 			<div class="card-content">
@@ -499,8 +499,8 @@
 					<li><u>{% trans %}yt-dlp version:{% endtrans %}</u> {{ youtubedl_version }}</li>
 					{# MSG: The version of the program "ffmpeg". #}
 					<li><u>{% trans %}FFmpeg version:{% endtrans %}</u> {{ ffmpeg_version }} {% if not is_transpose_enabled %} (missing lib-rubberband, pitch shift is not supported) {% endif %}</li>
-					{# MSG: The version of Pikaraoke running right now. #}
-					<li><u>{% trans %}Pikaraoke version:{% endtrans %}</u> {{ pikaraoke_version }}</li>
+					{# MSG: The version of Biaoke running right now. #}
+					<li><u>{% trans %}Biaoke version:{% endtrans %}</u> {{ biaoke_version }}</li>
 					</ul>
 				</div>
 			</div>
@@ -511,11 +511,11 @@
 			<div class="card-content">
 				<div class="content">
 					<ul>
-					{# MSG: The CPU usage of the computer running Pikaraoke. #}
+					{# MSG: The CPU usage of the computer running Biaoke. #}
 					<li>{% trans %}CPU:{% endtrans %} <span id="system-cpu">{% trans %}Loading...{% endtrans %}</span></li>
-					{# MSG: The disk usage of the computer running Pikaraoke. Used by downloaded songs. #}
+					{# MSG: The disk usage of the computer running Biaoke. Used by downloaded songs. #}
 					<li>{% trans %}Disk Usage:{% endtrans %} <span id="system-disk">{% trans %}Loading...{% endtrans %}</span></li>
-					{# MSG: The memory (RAM) usage of the computer running Pikaraoke. #}
+					{# MSG: The memory (RAM) usage of the computer running Biaoke. #}
 					<li>{% trans %}Memory:{% endtrans %} <span id="system-memory">{% trans %}Loading...{% endtrans %}</span></li>
 					</ul>
 				</div>
@@ -538,14 +538,14 @@
 						The current installed version is: "{{ youtubedl_version }}".
 					{% endtrans %}</p>
 					<a id="update-ytdl-link" class="button is-primary is-inverted" href="{{ url_for('admin.update_ytdl') }}"
-						{# MSG: Text for the link which will try and update yt-dlp on the machine running Pikaraoke. #}
+						{# MSG: Text for the link which will try and update yt-dlp on the machine running Biaoke. #}
 							>{% trans %}Update yt-dlp{% endtrans %}</a
 						>
 					<p class="mt-3 is-size-7 has-text-warning">
-						{# MSG: Help text which explains why updating yt-dlp can fail. The log is a file on the machine running Pikaraoke. #}
+						{# MSG: Help text which explains why updating yt-dlp can fail. The log is a file on the machine running Biaoke. #}
 						{% trans -%}
 							* This update link above may fail if you don't have proper file permissions.
-							Check the pikaraoke log for errors.
+							Check the biaoke log for errors.
 						{%- endtrans %}
 					</p>
 				</div>
@@ -566,7 +566,7 @@
 					<div class="content">
 						{# MSG: Explainitory text which explains why you might want to expand the filesystem. #}
 						<p>{% trans -%}
-							If you just installed the pre-built pikaraoke pi image and your SD card is larger than 4GB,
+							If you just installed the pre-built biaoke pi image and your SD card is larger than 4GB,
 							you may want to expand the filesystem to utilize the remaining space. You only need to do this once.
 							This will reboot the system.
 						{%- endtrans %}</p>
@@ -595,7 +595,7 @@
 			</div>
 		{% endif %}
 
-		{# MSG: Title of the section on shutting down / turning off the machine running Pikaraoke. #}
+		{# MSG: Title of the section on shutting down / turning off the machine running Biaoke. #}
 		<h1>{% trans %}Shutdown{% endtrans %}</h1>
 
 		<div class="card">
@@ -609,13 +609,13 @@
 					</p>
 
 					<div class="buttons">
-						{# MSG: Text for button which turns off Pikaraoke for everyone using it at your house. #}
-						<a id="quit-link" class="button is-primary" href="{{ url_for('admin.quit') }}">{% trans %}Quit Pikaraoke{% endtrans %}</a>
+						{# MSG: Text for button which turns off Biaoke for everyone using it at your house. #}
+						<a id="quit-link" class="button is-primary" href="{{ url_for('admin.quit') }}">{% trans %}Quit Biaoke{% endtrans %}</a>
 						{% if is_pi or is_linux %}
-							{# MSG: Text for button which reboots the machine running Pikaraoke. #}
+							{# MSG: Text for button which reboots the machine running Biaoke. #}
 							<a id="restart-link" class="button is-primary" href="{{ url_for('admin.reboot') }}">{% trans %}Reboot System{% endtrans %}</a>
 
-							{# MSG: Text for button which turn soff the machine running Pikaraoke. #}
+							{# MSG: Text for button which turn soff the machine running Biaoke. #}
 							<a id="shutdown-link" class="button is-primary" href="{{ url_for('admin.shutdown') }}">{% trans %}Shutdown System{% endtrans %}</a>
 						{% endif %}
 					</div>

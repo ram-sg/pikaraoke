@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
-from pikaraoke.lib.youtube_dl import (
+from biaoke.lib.youtube_dl import (
     build_ytdl_download_command,
     get_search_results,
     get_stream_url,
@@ -59,7 +59,7 @@ class TestGetYoutubeIdFromUrl:
 class TestBuildYtdlDownloadCommand:
     """Tests for the build_ytdl_download_command function."""
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_basic_command(self, mock_js):
         """Test building basic download command."""
         cmd = build_ytdl_download_command(
@@ -76,7 +76,7 @@ class TestBuildYtdlDownloadCommand:
         assert "/songs" in cmd[output_idx]
         assert "https://www.youtube.com/watch?v=test123" in cmd
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_high_quality_format(self, mock_js):
         """Test that high quality uses correct format string."""
         cmd = build_ytdl_download_command(
@@ -88,7 +88,7 @@ class TestBuildYtdlDownloadCommand:
         assert "bestvideo" in cmd[format_idx]
         assert "1080" in cmd[format_idx]
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_standard_quality_format(self, mock_js):
         """Test that standard quality uses mp4 format."""
         cmd = build_ytdl_download_command(
@@ -99,7 +99,7 @@ class TestBuildYtdlDownloadCommand:
         format_idx = cmd.index("-f") + 1
         assert cmd[format_idx] == "mp4"
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_with_proxy(self, mock_js):
         """Test command with proxy setting."""
         cmd = build_ytdl_download_command(
@@ -111,7 +111,7 @@ class TestBuildYtdlDownloadCommand:
         proxy_idx = cmd.index("--proxy") + 1
         assert cmd[proxy_idx] == "http://proxy:8080"
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_with_additional_args(self, mock_js):
         """Test command with additional arguments."""
         cmd = build_ytdl_download_command(
@@ -123,7 +123,7 @@ class TestBuildYtdlDownloadCommand:
         assert "--age-limit" in cmd
         assert "18" in cmd
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value="node")
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value="node")
     def test_with_js_runtime_node(self, mock_js):
         """Test that node JS runtime is added to command."""
         cmd = build_ytdl_download_command(
@@ -134,7 +134,7 @@ class TestBuildYtdlDownloadCommand:
         js_idx = cmd.index("--js-runtimes") + 1
         assert cmd[js_idx] == "node"
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value="deno")
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value="deno")
     def test_deno_not_added(self, mock_js):
         """Test that deno JS runtime is NOT added (it's yt-dlp default)."""
         cmd = build_ytdl_download_command(
@@ -143,7 +143,7 @@ class TestBuildYtdlDownloadCommand:
         )
         assert "--js-runtimes" not in cmd
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value="bun")
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value="bun")
     def test_with_js_runtime_bun(self, mock_js):
         """Test that bun JS runtime is added to command."""
         cmd = build_ytdl_download_command(
@@ -154,7 +154,7 @@ class TestBuildYtdlDownloadCommand:
         js_idx = cmd.index("--js-runtimes") + 1
         assert cmd[js_idx] == "bun"
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_vcodec_sort(self, mock_js):
         """Test that h264 codec sorting is included."""
         cmd = build_ytdl_download_command(
@@ -165,7 +165,7 @@ class TestBuildYtdlDownloadCommand:
         sort_idx = cmd.index("-S") + 1
         assert cmd[sort_idx] == "vcodec:h264"
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_url_is_last_argument(self, mock_js):
         """Test that video URL is always the last argument."""
         cmd = build_ytdl_download_command(
@@ -180,7 +180,7 @@ class TestBuildYtdlDownloadCommand:
 class TestSearchAndPreviewCommands:
     def test_search_uses_additional_args(self):
         output = b'{"title":"Song","url":"https://youtube.com/watch?v=abc","id":"abc"}\n'
-        with patch("pikaraoke.lib.youtube_dl.subprocess.check_output", return_value=output) as mock_check:
+        with patch("biaoke.lib.youtube_dl.subprocess.check_output", return_value=output) as mock_check:
             get_search_results("song", additional_args="--cookies /tmp/youtube-cookies.txt")
 
         cmd = mock_check.call_args.args[0]
@@ -188,7 +188,7 @@ class TestSearchAndPreviewCommands:
         assert "/tmp/youtube-cookies.txt" in cmd
         assert cmd[-1] == 'ytsearch10:"song"'
 
-    @patch("pikaraoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_stream_url_uses_additional_args(self, mock_js):
         result = subprocess.CompletedProcess(
             args=[],
@@ -196,7 +196,7 @@ class TestSearchAndPreviewCommands:
             stdout=b"https://stream.example/video.mp4\n",
             stderr=b"",
         )
-        with patch("pikaraoke.lib.youtube_dl.subprocess.run", return_value=result) as mock_run:
+        with patch("biaoke.lib.youtube_dl.subprocess.run", return_value=result) as mock_run:
             stream_url = get_stream_url(
                 "https://www.youtube.com/watch?v=abc",
                 additional_args="--cookies /tmp/youtube-cookies.txt",
@@ -228,7 +228,7 @@ class TestGetYoutubedlVersion:
 class TestUpgradeYoutubedl:
     """Tests for the upgrade_youtubedl function."""
 
-    @patch("pikaraoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.02.01")
+    @patch("biaoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.02.01")
     def test_successful_self_upgrade(self, mock_version):
         """Test successful self-upgrade via yt-dlp -U."""
         with patch("subprocess.check_output", return_value=b"Updated to 2024.02.01"):
@@ -242,13 +242,13 @@ class TestUpgradeYoutubedl:
         error.output = pip_message
 
         with patch(
-            "pikaraoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.02.01"
+            "biaoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.02.01"
         ), patch("shutil.which", return_value=None), patch(
             "subprocess.check_output"
         ) as mock_check, patch(
-            "pikaraoke.lib.youtube_dl.sys.prefix", "/venv"
+            "biaoke.lib.youtube_dl.sys.prefix", "/venv"
         ), patch(
-            "pikaraoke.lib.youtube_dl.sys.base_prefix", "/different"
+            "biaoke.lib.youtube_dl.sys.base_prefix", "/different"
         ):
             # First call raises error suggesting pip, second call succeeds
             mock_check.side_effect = [error, b"Successfully installed yt-dlp"]
@@ -269,13 +269,13 @@ class TestUpgradeYoutubedl:
         error.output = pip_message
 
         with patch(
-            "pikaraoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.02.01"
+            "biaoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.02.01"
         ), patch("shutil.which", return_value=None), patch(
             "subprocess.check_output"
         ) as mock_check, patch(
-            "pikaraoke.lib.youtube_dl.sys.prefix", "/usr"
+            "biaoke.lib.youtube_dl.sys.prefix", "/usr"
         ), patch(
-            "pikaraoke.lib.youtube_dl.sys.base_prefix", "/usr"
+            "biaoke.lib.youtube_dl.sys.base_prefix", "/usr"
         ):
             # First call raises error suggesting pip, second call succeeds
             mock_check.side_effect = [error, b"Successfully installed yt-dlp"]
@@ -289,7 +289,7 @@ class TestUpgradeYoutubedl:
             assert "pip" in second_call_args
             assert "--break-system-packages" in second_call_args
 
-    @patch("pikaraoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.01.01")
+    @patch("biaoke.lib.youtube_dl.get_youtubedl_version", return_value="2024.01.01")
     def test_returns_version_after_upgrade(self, mock_version):
         """Test that current version is returned after upgrade."""
         with patch("subprocess.check_output", return_value=b"Already up to date"):

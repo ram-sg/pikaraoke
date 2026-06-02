@@ -1,5 +1,5 @@
 services:
-  pikaraoke:
+  biaoke:
     # --- BUILD OPTION ---
     # Build locally when testing changes from this checkout.
     # Run docker compose from the repository root.
@@ -9,36 +9,36 @@ services:
 
     # --- IMAGE OPTION ---
     # To use the pre-built image instead, remove the build section and uncomment:
-    # image: vicwomg/pikaraoke:latest
-    image: pikaraoke-local:latest
+    # image: vicwomg/biaoke:latest
+    image: biaoke-local:latest
 
-    container_name: PiKaraoke
+    container_name: Biaoke
     environment:
-      PIKARAOKE_LOGIN: ${PIKARAOKE_LOGIN:-}
-      PIKARAOKE_PASSWORD: ${PIKARAOKE_PASSWORD:-}
-      PIKARAOKE_PUBLIC_URL: ${PIKARAOKE_PUBLIC_URL:-http://<YOUR_LAN_IP>:5555}
+      BIAOKE_LOGIN: ${BIAOKE_LOGIN:-}
+      BIAOKE_PASSWORD: ${BIAOKE_PASSWORD:-}
+      BIAOKE_PUBLIC_URL: ${BIAOKE_PUBLIC_URL:-http://<YOUR_LAN_IP>:5555}
       # Optional: pass extra yt-dlp args. For authenticated YouTube downloads,
       # export youtube.com cookies to ./data/youtube-cookies.txt and set:
-      # PIKARAOKE_YTDL_ARGS=--cookies /home/pikaraoke/.pikaraoke/youtube-cookies.txt
-      PIKARAOKE_YTDL_ARGS: ${PIKARAOKE_YTDL_ARGS:-}
+      # BIAOKE_YTDL_ARGS=--cookies /home/biaoke/.biaoke/youtube-cookies.txt
+      BIAOKE_YTDL_ARGS: ${BIAOKE_YTDL_ARGS:-}
       # Optional GPU scoring service URL. Leave empty to use the built-in CPU fallback.
-      PIKARAOKE_SCORING_SERVICE_URL: ${PIKARAOKE_SCORING_SERVICE_URL:-http://scoring:8765/analyze}
+      BIAOKE_SCORING_SERVICE_URL: ${BIAOKE_SCORING_SERVICE_URL:-http://scoring:8765/analyze}
 
     # --- COMMAND CONFIGURATION ---
     # -u: Required for the QR code to work on other devices.
     #     Replace <YOUR_LAN_IP> with your computer's actual IP (e.g., 192.168.1.50)
     # --config-file-path: Ensures settings are saved to the mounted volume
-    # For Cloudflare Tunnel, set PIKARAOKE_PUBLIC_URL in .env to your public
+    # For Cloudflare Tunnel, set BIAOKE_PUBLIC_URL in .env to your public
     # https:// hostname after creating the tunnel route.
     entrypoint:
       - /bin/sh
       - -c
       - |
-        set -- -d /app/pikaraoke-songs/ --headless -u "$${PIKARAOKE_PUBLIC_URL:-http://<YOUR_LAN_IP>:5555}"
-        if [ -n "$${PIKARAOKE_YTDL_ARGS:-}" ]; then
-          set -- "$$@" --ytdl-args "$${PIKARAOKE_YTDL_ARGS}"
+        set -- -d /app/biaoke-songs/ --headless -u "$${BIAOKE_PUBLIC_URL:-http://<YOUR_LAN_IP>:5555}"
+        if [ -n "$${BIAOKE_YTDL_ARGS:-}" ]; then
+          set -- "$$@" --ytdl-args "$${BIAOKE_YTDL_ARGS}"
         fi
-        exec pikaraoke "$$@"
+        exec biaoke "$$@"
 
     # --- VOLUMES ---
     # The <local_directory>:<container_directory> format is used.
@@ -46,8 +46,8 @@ services:
     # You can change the <local_directory> to an absolute path (e.g., C:/Music or /home/pi/Music)
     # Relative current directory paths (./) are used here for simplicity.
     volumes:
-      - ./songs:/app/pikaraoke-songs      # Songs will be saved here
-      - ./data:/home/pikaraoke/.pikaraoke # Data, including your config, will be saved here
+      - ./songs:/app/biaoke-songs      # Songs will be saved here
+      - ./data:/home/biaoke/.biaoke # Data, including your config, will be saved here
 
     # --- PORTS ---
     # Map host port 5555 to container port 5555
@@ -57,7 +57,7 @@ services:
     restart: unless-stopped
 
     networks:
-      - pikaraoke
+      - biaoke
 
     # Logging limits to prevent disk filling
     logging:
@@ -72,8 +72,8 @@ services:
     build:
       context: .
       dockerfile: build_scripts/docker/scoring.Dockerfile
-    image: pikaraoke-scoring:latest
-    container_name: PiKaraoke-Scoring
+    image: biaoke-scoring:latest
+    container_name: Biaoke-Scoring
     gpus: all
     runtime: nvidia
     environment:
@@ -81,7 +81,7 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     restart: unless-stopped
     networks:
-      - pikaraoke
+      - biaoke
     logging:
       driver: "json-file"
       options:
@@ -93,17 +93,17 @@ services:
     # Cloudflare dashboard, then paste its token into CLOUDFLARED_TUNNEL_TOKEN
     # in .env.
     image: cloudflare/cloudflared:latest
-    container_name: PiKaraoke-Cloudflared
+    container_name: Biaoke-Cloudflared
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN:-}
     command: >
       tunnel --no-autoupdate --protocol ${CLOUDFLARED_PROTOCOL:-http2} run
     depends_on:
-      - pikaraoke
+      - biaoke
     restart: unless-stopped
-    # Share PiKaraoke's network namespace so remotely-managed Cloudflare
+    # Share Biaoke's network namespace so remotely-managed Cloudflare
     # origins can use http://localhost:5555.
-    network_mode: "service:pikaraoke"
+    network_mode: "service:biaoke"
 
     logging:
       driver: "json-file"
@@ -112,5 +112,5 @@ services:
         max-file: "3"
 
 networks:
-  pikaraoke:
+  biaoke:
     driver: bridge

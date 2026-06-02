@@ -1,5 +1,5 @@
 [project]
-name = "pikaraoke"
+name = "biaoke"
 version = "1.19.0"
 description = "Youtube-based Karaoke machine for Raspberry Pi, OSX, Windows, and Linux"
 authors = [{name = "Vic Wong"}]
@@ -46,18 +46,18 @@ translations = [
 ]
 
 [project.scripts]
-pikaraoke = "pikaraoke.app:main"
+biaoke = "biaoke.app:main"
 
 [project.urls]
-Homepage = "https://github.com/vicwomg/pikaraoke"
-Repository = "https://github.com/vicwomg/pikaraoke"
+Homepage = "https://github.com/vicwomg/biaoke"
+Repository = "https://github.com/vicwomg/biaoke"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pikaraoke"]
+packages = ["biaoke"]
 
 # Poetry-specific configuration (reads from [project] above)
 [tool.poetry]
@@ -85,8 +85,8 @@ pythonPlatform = "Linux"
 
 [tool.coverage.run]
 omit = [
-    "pikaraoke/constants.py",
-    "pikaraoke/app.py",
-    "pikaraoke/lib/current_app.py",
-    "pikaraoke/lib/args.py",
+    "biaoke/constants.py",
+    "biaoke/app.py",
+    "biaoke/lib/current_app.py",
+    "biaoke/lib/args.py",
 ]

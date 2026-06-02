@@ -10,7 +10,7 @@ from flask_babel import Babel
 if not hasattr(werkzeug, "__version__"):
     werkzeug.__version__ = "3.0.0"
 
-from pikaraoke.routes.splash import (
+from biaoke.routes.splash import (
     _default_score_phrases,
     _get_active_score_phrases,
     splash_bp,
@@ -92,7 +92,7 @@ class TestGetActiveScorePhrases:
 class TestScorePhrasesEndpoint:
     """Tests for GET /splash/score_phrases."""
 
-    @patch("pikaraoke.routes.splash.get_karaoke_instance")
+    @patch("biaoke.routes.splash.get_karaoke_instance")
     def test_returns_json_with_all_tiers(self, mock_get_instance, client):
         mock_get_instance.return_value = _make_karaoke(low="Bad|Terrible")
 

@@ -9,10 +9,10 @@ from flask import Flask
 if not hasattr(werkzeug, "__version__"):
     werkzeug.__version__ = "3.0.0"
 
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.routes.preferences import preferences_bp
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.routes.preferences import preferences_bp
 
-ROUTE_PREFIX = "pikaraoke.routes.preferences"
+ROUTE_PREFIX = "biaoke.routes.preferences"
 
 
 @pytest.fixture

@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working on PiKaraoke.
+Guidance for Claude Code when working on Biaoke.
 
 ## Project Overview
 
-PiKaraoke is a karaoke system for Raspberry Pi, Windows, macOS, and Linux. Web interface for YouTube song search, queuing, and playback with pitch shifting and streaming.
+Biaoke is a karaoke system for Raspberry Pi, Windows, macOS, and Linux. Web interface for YouTube song search, queuing, and playback with pitch shifting and streaming.
 
 ## Core Principles
 
@@ -43,7 +43,7 @@ PiKaraoke is a karaoke system for Raspberry Pi, Windows, macOS, and Linux. Web i
 
 YouTube video filenames use exactly 11-character IDs:
 
-- PiKaraoke format: `Title---dQw4w9WgXcQ.mp4` (triple dash)
+- Biaoke format: `Title---dQw4w9WgXcQ.mp4` (triple dash)
 - yt-dlp format: `Title [dQw4w9WgXcQ].mp4` (brackets)
 
 Only support these two patterns.

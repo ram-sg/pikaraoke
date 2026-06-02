@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from pikaraoke.lib.song_list import SongList
+from biaoke.lib.song_list import SongList
 
 
 class TestSongListBasicOperations:

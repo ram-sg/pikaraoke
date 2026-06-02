@@ -1,6 +1,6 @@
-# Finnish (Finland) translations for pikaraoke.
+# Finnish (Finland) translations for biaoke.
 # Copyright (C) 2024 ORGANIZATION
-# This file is distributed under the same license as the Pikaraoke project.
+# This file is distributed under the same license as the Biaoke project.
 # FIRST AUTHOR <minna.soudunsaari@gmail.com>, 2024.
 #
 msgid ""
@@ -187,13 +187,13 @@ msgstr "Päivitetään yt-dlp! Pitäisi kestää minuutti tai kaksi..."
 msgid "You don't have permission to update yt-dlp"
 msgstr "Sinulla ei ole lupaa päivittää yt-dlp:ää"
 
-#. Message shown after quitting pikaraoke.
+#. Message shown after quitting biaoke.
 #: routes/admin.py:97
-msgid "Exiting pikaraoke now!"
-msgstr "Sammuta Pikaraoke"
+msgid "Exiting biaoke now!"
+msgstr "Sammuta Biaoke"
 
 # auto-translated
-#. Message shown after trying to quit pikaraoke without admin permissions.
+#. Message shown after trying to quit biaoke without admin permissions.
 #: routes/admin.py:104
 msgid "You don't have permission to quit"
 msgstr "Sinulla ei ole lupaa lopettaa"
@@ -808,7 +808,7 @@ msgid "Are you sure you want to quit?"
 msgstr "Haluatko varmasti että haluat lopettaa?"
 
 #. Confirmation text whe the user starts to turn off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:75
 msgid "Are you sure you want to shut down?"
 msgstr "Haluatko varmasti sammuttaa karaokelaitteen?"
@@ -819,7 +819,7 @@ msgid "Are you sure you want to clear your preferences?"
 msgstr "Haluatko varmasti käynnistää karaokelaitteen uudestaan?"
 
 #. Confirmation text whe the user starts to reboot the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:91
 msgid "Are you sure you want to reboot?"
 msgstr "Haluatko varmasti käynnistää karaokelaitteen uudestaan?"
@@ -1135,7 +1135,7 @@ msgstr "Tyhjennä asetukset"
 msgid "System Data"
 msgstr "Järjestelmätiedot"
 
-#. Header of the information section about the computer running Pikaraoke.
+#. Header of the information section about the computer running Biaoke.
 #: templates/info.html:483
 msgid "System Info"
 msgstr "Järjestelmän Tiedot"
@@ -1164,10 +1164,10 @@ msgid "FFmpeg version:"
 msgstr "FFmpeg-versio:"
 
 # auto-translated
-#. The version of Pikaraoke running right now.
+#. The version of Biaoke running right now.
 #: templates/info.html:497
-msgid "Pikaraoke version:"
-msgstr "Pikaraoke versio:"
+msgid "Biaoke version:"
+msgstr "Biaoke versio:"
 
 # auto-translated
 #. Header of the information section about the System stats.
@@ -1176,7 +1176,7 @@ msgid "System stats"
 msgstr "Järjestelmän tilastot"
 
 # auto-translated
-#. The CPU usage of the computer running Pikaraoke.
+#. The CPU usage of the computer running Biaoke.
 #: templates/info.html:509
 msgid "CPU:"
 msgstr "CPU:"
@@ -1187,13 +1187,13 @@ msgid "Loading..."
 msgstr "Ladataan..."
 
 # auto-translated
-#. The disk usage of the computer running Pikaraoke. Used by downloaded songs.
+#. The disk usage of the computer running Biaoke. Used by downloaded songs.
 #: templates/info.html:511
 msgid "Disk Usage:"
 msgstr "Levyn käyttö:"
 
 # auto-translated
-#. The memory (RAM) usage of the computer running Pikaraoke.
+#. The memory (RAM) usage of the computer running Biaoke.
 #: templates/info.html:513
 msgid "Memory:"
 msgstr "Muisti:"
@@ -1224,22 +1224,22 @@ msgstr ""
 "   Tämänhetkinen asennettu versio: \"%(youtubedl_version)s\""
 
 #. Text for the link which will try and update yt-dlp on the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:536
 msgid "Update yt-dlp"
 msgstr "Päivitä yt-dlp"
 
 #. Help text which explains why updating yt-dlp can fail. The log is a file on
-#. the machine running Pikaraoke.
+#. the machine running Biaoke.
 #: templates/info.html:540
 msgid ""
 "* This update link above may fail if you don't have proper file "
 "permissions.\n"
-"\t\t\t\t\t\t\tCheck the pikaraoke log for errors."
+"\t\t\t\t\t\t\tCheck the biaoke log for errors."
 msgstr ""
 "Ylläoleva päivityslinkki saattaa epäonnistua, jos sinulla ei ole "
 "tarvittavia tiedoston käyttöoikeuksia.\n"
-"    Tarkista pikaraoke-log virheet."
+"    Tarkista biaoke-log virheet."
 
 #. Title of the updates section.
 #: templates/info.html:552
@@ -1256,13 +1256,13 @@ msgstr "Laajenna Raspberry Pi -tiedostojärjestelmää"
 #. filesystem.
 #: templates/info.html:562
 msgid ""
-"If you just installed the pre-built pikaraoke pi image and your SD card "
+"If you just installed the pre-built biaoke pi image and your SD card "
 "is larger than 4GB,\n"
 "\t\t\t\t\t\t\tyou may want to expand the filesystem to utilize the "
 "remaining space. You only need to do this once.\n"
 "\t\t\t\t\t\t\tThis will reboot the system."
 msgstr ""
-"Jos asensit juuri valmiin Pikaraoke pi-imagen   ja SD-korttisi on "
+"Jos asensit juuri valmiin Biaoke pi-imagen   ja SD-korttisi on "
 "suurempi kuin 4 Gt,\n"
 "    voit halutessasi laajentaa tiedostojärjestelmää hyödyntääksesi "
 "jäljellä olevan tilan. Sinun tarvitsee tehdä tämä vain kerran.\n"
@@ -1281,7 +1281,7 @@ msgid "Log out"
 msgstr "Kirjaudu ulos"
 
 #. Title of the section on shutting down / turning off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:593
 msgid "Shutdown"
 msgstr "Sammuta"
@@ -1295,18 +1295,18 @@ msgstr ""
 "Älä vain vedä pistokkeesta! Sammuta karaokelaite (=server) aina huolella,"
 " jotta tiedostot eivät vioitu."
 
-#. Text for button which turns off Pikaraoke for everyone using it at your
+#. Text for button which turns off Biaoke for everyone using it at your
 #. house.
 #: templates/info.html:607
-msgid "Quit Pikaraoke"
-msgstr "Sammuta Pikaraoke"
+msgid "Quit Biaoke"
+msgstr "Sammuta Biaoke"
 
-#. Text for button which reboots the machine running Pikaraoke.
+#. Text for button which reboots the machine running Biaoke.
 #: templates/info.html:610
 msgid "Reboot System"
 msgstr "Käynnistä järjestelmä uudelleen"
 
-#. Text for button which turn soff the machine running Pikaraoke.
+#. Text for button which turn soff the machine running Biaoke.
 #: templates/info.html:613
 msgid "Shutdown System"
 msgstr "Sammuta järjestelmä"
@@ -1548,7 +1548,7 @@ msgstr "Sinun pisteesi"
 #: templates/splash.html:132
 msgid ""
 "Due to limitations with browser permissions, you must interact\n"
-"      with the page once before it allows autoplay of videos. Pikaraoke "
+"      with the page once before it allows autoplay of videos. Biaoke "
 "will not\n"
 "      play otherwise. Click the button below to\n"
 "      <a onClick=\"handleConfirmation()\">confirm</a>."
@@ -1556,7 +1556,7 @@ msgstr ""
 "Selaimen käyttöoikeuksiin liittyvien rajoitusten vuoksi sinun on oltava "
 "vuorovaikutuksessa\n"
 "      sivulla kerran ennen kuin se sallii videoiden automaattisen "
-"toiston. Pikaraoke ei tule\n"
+"toiston. Biaoke ei tule\n"
 "      pelata toisin. Napsauta alla olevaa painiketta\n"
 "      <a onClick=\"handleConfirmation()\">vahvista</a>."
 

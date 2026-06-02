@@ -1,6 +1,6 @@
 """Unit tests for batch_song_renamer route-level logic."""
 
-from pikaraoke.routes.batch_song_renamer import _names_match
+from biaoke.routes.batch_song_renamer import _names_match
 
 
 class TestNamesMatch:

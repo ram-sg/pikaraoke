@@ -7,7 +7,7 @@ import shlex
 import subprocess
 import sys
 
-from pikaraoke.lib.get_platform import get_installed_js_runtime
+from biaoke.lib.get_platform import get_installed_js_runtime
 
 yt_dlp_cmd = [sys.executable, "-m", "yt_dlp"]
 

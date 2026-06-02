@@ -7,9 +7,9 @@ import flask_babel
 from flask import jsonify, render_template
 from flask_smorest import Blueprint
 
-from pikaraoke.karaoke import Karaoke
-from pikaraoke.lib.current_app import get_karaoke_instance, get_site_name
-from pikaraoke.lib.raspi_wifi_config import get_raspi_wifi_text
+from biaoke.karaoke import Karaoke
+from biaoke.lib.current_app import get_karaoke_instance, get_site_name
+from biaoke.lib.raspi_wifi_config import get_raspi_wifi_text
 
 _ = flask_babel.gettext
 

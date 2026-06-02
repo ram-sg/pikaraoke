@@ -4,7 +4,7 @@ Translation requires you have Babel installed, and the `pybabel` command availab
 
 Translation help is much appreciated
 
-Look in `pikaraoke/translations` directory and identify the `messages.po` file for a locale/language you can help translate. Fill in all the translations in the file and submit a PR or email the maintainer of pikaraoke.
+Look in `biaoke/translations` directory and identify the `messages.po` file for a locale/language you can help translate. Fill in all the translations in the file and submit a PR or email the maintainer of biaoke.
 
 ## Marking strings for translation
 
@@ -81,7 +81,7 @@ app startup when any `.po` file is newer than its `.mo` counterpart.
 
 ## Manual rebuilding
 
-You can also run the pybabel steps manually from the `./pikaraoke` subdirectory:
+You can also run the pybabel steps manually from the `./biaoke` subdirectory:
 
 ```shell
 $ pybabel extract -F babel.cfg -o messages.pot --add-comments="MSG:" --strip-comment-tags  --sort-by-file .
@@ -125,7 +125,7 @@ As well as editing the `constants.py` `LANGUAGES` mapping to make that language 
 Currently I have it set based on the Accept-Language header sent with each request,
 [which can be modified using this guide][accept-language-chrome].
 
-They can also be changed in the web UI's settings menu under "Preferred language" a restart of pikaraoke is required.
+They can also be changed in the web UI's settings menu under "Preferred language" a restart of biaoke is required.
 
 ## Testing a language
 

@@ -6,9 +6,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
-from pikaraoke.lib.scoring import ScoreAnalysisError, analyze_upload_bytes, get_scoring_engine_status
+from biaoke.lib.scoring import ScoreAnalysisError, analyze_upload_bytes, get_scoring_engine_status
 
-app = FastAPI(title="PiKaraoke Scoring Service")
+app = FastAPI(title="Biaoke Scoring Service")
 
 
 @app.get("/health")

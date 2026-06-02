@@ -18,8 +18,8 @@ from flask import (
 
 site_auth_bp = Blueprint("site_auth", __name__)
 
-LOGIN_ENV = "PIKARAOKE_LOGIN"
-PASSWORD_ENV = "PIKARAOKE_PASSWORD"
+LOGIN_ENV = "BIAOKE_LOGIN"
+PASSWORD_ENV = "BIAOKE_PASSWORD"
 LOGIN_SESSION_KEY = "site_authenticated"
 LOGIN_NAME_SESSION_KEY = "site_login"
 
@@ -108,7 +108,7 @@ def login():
 
     return render_template(
         "login.html",
-        site_title=current_app.config.get("SITE_NAME", "PiKaraoke"),
+        site_title=current_app.config.get("SITE_NAME", "Biaoke"),
         title="Login",
         blank_page=True,
         next_url=next_url,

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pikaraoke.lib.network import (
+from biaoke.lib.network import (
     _get_ip_android,
     _get_ip_default,
     _get_ip_via_psutil,
@@ -102,7 +102,7 @@ class TestGetIpDefault:
     def test_calls_udp_socket_with_correct_target(self):
         """Test that it calls UDP socket with correct target IP."""
         with patch(
-            "pikaraoke.lib.network._get_ip_via_udp_socket", return_value="192.168.1.100"
+            "biaoke.lib.network._get_ip_via_udp_socket", return_value="192.168.1.100"
         ) as mock:
             result = _get_ip_default()
             mock.assert_called_once_with("10.255.255.255")
@@ -114,28 +114,28 @@ class TestGetIp:
 
     def test_uses_psutil_when_available(self):
         """Test that psutil method is used first."""
-        with patch("pikaraoke.lib.network._get_ip_via_psutil", return_value="192.168.1.100"):
+        with patch("biaoke.lib.network._get_ip_via_psutil", return_value="192.168.1.100"):
             result = get_ip("linux")
             assert result == "192.168.1.100"
 
     def test_fallback_to_android_method(self):
         """Test fallback to Android method when psutil fails."""
-        with patch("pikaraoke.lib.network._get_ip_via_psutil", side_effect=Exception("No psutil")):
-            with patch("pikaraoke.lib.network._get_ip_android", return_value="192.168.1.200"):
+        with patch("biaoke.lib.network._get_ip_via_psutil", side_effect=Exception("No psutil")):
+            with patch("biaoke.lib.network._get_ip_android", return_value="192.168.1.200"):
                 result = get_ip("android")
                 assert result == "192.168.1.200"
 
     def test_fallback_to_windows_method(self):
         """Test fallback to Windows method when psutil fails."""
-        with patch("pikaraoke.lib.network._get_ip_via_psutil", side_effect=Exception("No psutil")):
-            with patch("pikaraoke.lib.network._get_ip_windows", return_value="192.168.1.150"):
+        with patch("biaoke.lib.network._get_ip_via_psutil", side_effect=Exception("No psutil")):
+            with patch("biaoke.lib.network._get_ip_windows", return_value="192.168.1.150"):
                 result = get_ip("windows")
                 assert result == "192.168.1.150"
 
     def test_fallback_to_default_method(self):
         """Test fallback to default method for Linux/macOS."""
-        with patch("pikaraoke.lib.network._get_ip_via_psutil", side_effect=Exception("No psutil")):
-            with patch("pikaraoke.lib.network._get_ip_default", return_value="192.168.1.75"):
+        with patch("biaoke.lib.network._get_ip_via_psutil", side_effect=Exception("No psutil")):
+            with patch("biaoke.lib.network._get_ip_default", return_value="192.168.1.75"):
                 result = get_ip("linux")
                 assert result == "192.168.1.75"
 

@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 import ffmpeg
 
-from pikaraoke.lib.get_platform import is_running_in_docker
+from biaoke.lib.get_platform import is_running_in_docker
 
 if TYPE_CHECKING:
-    from pikaraoke.lib.file_resolver import FileResolver
+    from biaoke.lib.file_resolver import FileResolver
 
 
 def get_media_duration(file_path: str) -> int | None:

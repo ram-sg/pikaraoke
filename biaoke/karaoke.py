@@ -12,32 +12,32 @@ import qrcode
 from flask_babel import _
 from qrcode.image.pure import PyPNGImage
 
-from pikaraoke.lib.download_manager import DownloadManager
-from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.ffmpeg import (
+from biaoke.lib.download_manager import DownloadManager
+from biaoke.lib.events import EventSystem
+from biaoke.lib.ffmpeg import (
     get_ffmpeg_version,
     is_transpose_enabled,
     supports_hardware_h264_encoding,
 )
-from pikaraoke.lib.get_platform import (
+from biaoke.lib.get_platform import (
     get_data_directory,
     get_os_version,
     get_platform,
     is_raspberry_pi,
 )
-from pikaraoke.lib.karaoke_database import KaraokeDatabase
-from pikaraoke.lib.library_scanner import LibraryScanner, ScanResult
-from pikaraoke.lib.network import get_ip
-from pikaraoke.lib.playback_controller import PlaybackController
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.lib.queue_manager import QueueManager
-from pikaraoke.lib.song_manager import SongManager
-from pikaraoke.lib.youtube_dl import (
+from biaoke.lib.karaoke_database import KaraokeDatabase
+from biaoke.lib.library_scanner import LibraryScanner, ScanResult
+from biaoke.lib.network import get_ip
+from biaoke.lib.playback_controller import PlaybackController
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.queue_manager import QueueManager
+from biaoke.lib.song_manager import SongManager
+from biaoke.lib.youtube_dl import (
     get_search_results,
     get_youtubedl_version,
     upgrade_youtubedl,
 )
-from pikaraoke.version import __version__ as VERSION
+from biaoke.version import __version__ as VERSION
 
 
 class Karaoke:
@@ -89,7 +89,7 @@ class Karaoke:
         bg_music_path: str | None = None,
         bg_video_path: str | None = None,
         config_file_path: str = "config.ini",
-        download_path: str = "/usr/lib/pikaraoke/songs",
+        download_path: str = "/usr/lib/biaoke/songs",
         hide_splash_screen: bool | None = None,
         log_level: int = logging.DEBUG,
         logo_path: str | None = None,
@@ -178,7 +178,7 @@ class Karaoke:
         self.youtubedl_version = get_youtubedl_version()
         self.is_raspberry_pi = is_raspberry_pi()
 
-        logging.info("PiKaraoke version: " + VERSION)
+        logging.info("Biaoke version: " + VERSION)
 
         # Set non-preference attributes (not stored in config)
         self.port = port
@@ -339,7 +339,7 @@ class Karaoke:
         self.preferences.apply_all(**cli_overrides)
 
     def get_url(self):
-        """Get the URL for accessing the PiKaraoke web interface.
+        """Get the URL for accessing the Biaoke web interface.
 
         On Raspberry Pi, retries getting the IP address for up to 30 seconds
         in case the network is still initializing at startup.
@@ -548,7 +548,7 @@ class Karaoke:
 
         This method blocks until stop() is called or KeyboardInterrupt.
         """
-        logging.debug("Starting PiKaraoke run loop")
+        logging.debug("Starting Biaoke run loop")
         logging.info(f"Connect the player host to: {self.url}/splash")
         self.running = True
         while self.running:
@@ -584,5 +584,5 @@ class Karaoke:
                 self.playback_controller.log_output()
                 self.handle_run_loop()
             except KeyboardInterrupt:
-                logging.warning("Keyboard interrupt: Exiting pikaraoke...")
+                logging.warning("Keyboard interrupt: Exiting biaoke...")
                 self.running = False

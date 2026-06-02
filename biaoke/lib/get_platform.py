@@ -1,4 +1,4 @@
-"""Platform detection utilities for PiKaraoke."""
+"""Platform detection utilities for Biaoke."""
 
 import io
 import os
@@ -129,19 +129,19 @@ def get_default_dl_dir(platform: str) -> str:
         Path string for the default download directory.
     """
     if is_raspberry_pi():
-        return "~/pikaraoke-songs"
+        return "~/biaoke-songs"
     elif is_windows():
-        legacy_directory = os.path.expanduser("~\\pikaraoke\\songs")
+        legacy_directory = os.path.expanduser("~\\biaoke\\songs")
         if os.path.exists(legacy_directory):
             return legacy_directory
         else:
-            return "~\\pikaraoke-songs"
+            return "~\\biaoke-songs"
     else:
-        legacy_directory = "~/pikaraoke/songs"
+        legacy_directory = "~/biaoke/songs"
         if os.path.exists(legacy_directory):
             return legacy_directory
         else:
-            return "~/pikaraoke-songs"
+            return "~/biaoke-songs"
 
 
 def get_os_version() -> str:
@@ -163,15 +163,15 @@ def get_data_directory() -> str:
         Path to the data directory.
     """
     if is_windows():
-        # Windows: %APPDATA%/pikaraoke
+        # Windows: %APPDATA%/biaoke
         base_path = os.environ.get("APPDATA")
         # Fallback if APPDATA is not set (rare, but possible)
         if not base_path:
             base_path = os.path.expanduser("~")
-        path = os.path.join(base_path, "pikaraoke")
+        path = os.path.join(base_path, "biaoke")
     else:
-        # Linux, macOS, Android, Raspberry Pi: ~/.pikaraoke
-        path = os.path.expanduser("~/.pikaraoke")
+        # Linux, macOS, Android, Raspberry Pi: ~/.biaoke
+        path = os.path.expanduser("~/.biaoke")
 
     # Ensure the directory exists
     if not os.path.exists(path):

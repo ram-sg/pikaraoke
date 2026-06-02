@@ -1,11 +1,11 @@
-"""Command-line argument parsing for PiKaraoke."""
+"""Command-line argument parsing for Biaoke."""
 
 import argparse
 import logging
 import os
 
-from pikaraoke.lib.get_platform import get_default_dl_dir, get_platform
-from pikaraoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.get_platform import get_default_dl_dir, get_platform
+from biaoke.lib.preference_manager import PreferenceManager
 
 
 def arg_path_parse(path: str | list[str] | None) -> str | None:
@@ -62,8 +62,8 @@ default_dl_dir = get_default_dl_dir(platform)
 _DEFAULTS = PreferenceManager.DEFAULTS
 
 
-def parse_pikaraoke_args() -> argparse.Namespace:
-    """Parse command-line arguments for PiKaraoke.
+def parse_biaoke_args() -> argparse.Namespace:
+    """Parse command-line arguments for Biaoke.
 
     Returns:
         Parsed arguments namespace with all configuration options.
@@ -116,7 +116,7 @@ def parse_pikaraoke_args() -> argparse.Namespace:
         "--hide-splash-screen",
         "--headless",
         action="store_true",
-        help="Headless mode. Don't launch the splash screen/player on the pikaraoke server",
+        help="Headless mode. Don't launch the splash screen/player on the biaoke server",
         required=False,
     )
     parser.add_argument(
@@ -232,7 +232,7 @@ def parse_pikaraoke_args() -> argparse.Namespace:
     parser.add_argument(
         "--hide-overlay",
         action="store_true",
-        help="Hide all overlays that show on top of video, including current/next song, pikaraoke QR code and IP",
+        help="Hide all overlays that show on top of video, including current/next song, biaoke QR code and IP",
         required=False,
     )
     parser.add_argument(
@@ -294,7 +294,7 @@ def parse_pikaraoke_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--limit-user-songs-by",
-        help=f"Limit the number of songs a user can add to queue. User name 'Pikaraoke' is always unlimited (default: {_DEFAULTS['limit_user_songs_by']} = unlimited)",
+        help=f"Limit the number of songs a user can add to queue. User name 'Biaoke' is always unlimited (default: {_DEFAULTS['limit_user_songs_by']} = unlimited)",
         default=None,
         required=False,
     )

@@ -70,7 +70,7 @@ async function rotateScore(scoreTextElement, duration) {
 
 async function startScore(staticPath, scoreResult = null) {
   try {
-    const r = await fetch(PikaraokeConfig.scorePhrasesUrl);
+    const r = await fetch(BiaokeConfig.scorePhrasesUrl);
     scoreReviews = await r.json();
   } catch (_e) {
     // Network failure: keep the last successfully fetched phrases

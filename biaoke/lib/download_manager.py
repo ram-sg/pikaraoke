@@ -9,11 +9,11 @@ import uuid
 from queue import Queue
 from threading import Thread
 
-from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.lib.queue_manager import QueueManager
-from pikaraoke.lib.song_manager import SongManager
-from pikaraoke.lib.youtube_dl import (
+from biaoke.lib.events import EventSystem
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.queue_manager import QueueManager
+from biaoke.lib.song_manager import SongManager
+from biaoke.lib.youtube_dl import (
     build_ytdl_download_command,
     get_youtube_id_from_url,
 )
@@ -99,7 +99,7 @@ class DownloadManager:
         self,
         video_url: str,
         enqueue: bool = False,
-        user: str = "Pikaraoke",
+        user: str = "Biaoke",
         title: str | None = None,
     ) -> None:
         """Queue a video for download.

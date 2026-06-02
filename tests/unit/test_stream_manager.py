@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.lib.stream_manager import PlaybackResult, StreamManager, enqueue_output
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.stream_manager import PlaybackResult, StreamManager, enqueue_output
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ class TestStreamManagerLogFfmpegOutput:
         sm.ffmpeg_log.put(b"Processing frame 1\n")
         sm.ffmpeg_log.put(b"Processing frame 2\n")
 
-        with patch("pikaraoke.lib.stream_manager.logging") as mock_logging:
+        with patch("biaoke.lib.stream_manager.logging") as mock_logging:
             sm.log_ffmpeg_output()
             assert mock_logging.debug.call_count == 2
 
@@ -74,7 +74,7 @@ class TestStreamManagerLogFfmpegOutput:
         sm = StreamManager(test_prefs)
         sm.ffmpeg_log = Queue()
 
-        with patch("pikaraoke.lib.stream_manager.logging") as mock_logging:
+        with patch("biaoke.lib.stream_manager.logging") as mock_logging:
             sm.log_ffmpeg_output()
             mock_logging.debug.assert_not_called()
 
@@ -152,9 +152,9 @@ class TestStreamManagerCopyFile:
         assert dest_file.exists()
         assert dest_file.read_bytes() == b"video content"
 
-    @patch("pikaraoke.lib.stream_manager.time")
-    @patch("pikaraoke.lib.stream_manager.os.path.exists", return_value=False)
-    @patch("pikaraoke.lib.stream_manager.shutil")
+    @patch("biaoke.lib.stream_manager.time")
+    @patch("biaoke.lib.stream_manager.os.path.exists", return_value=False)
+    @patch("biaoke.lib.stream_manager.shutil")
     def test_copy_file_returns_false_when_dest_never_appears(
         self, mock_shutil, mock_exists, mock_time, test_prefs
     ):
@@ -338,8 +338,8 @@ class TestStreamManagerTranscodeFile:
         mock_build_cmd.return_value = mock_cmd
         return mock_cmd, mock_process
 
-    @patch("pikaraoke.lib.stream_manager.Thread")
-    @patch("pikaraoke.lib.stream_manager.build_ffmpeg_cmd")
+    @patch("biaoke.lib.stream_manager.Thread")
+    @patch("biaoke.lib.stream_manager.build_ffmpeg_cmd")
     def test_transcode_success(self, mock_build_cmd, mock_thread, test_prefs):
         """Test successful transcoding when FFmpeg exits with code 0."""
         sm = StreamManager(test_prefs)
@@ -353,8 +353,8 @@ class TestStreamManagerTranscodeFile:
         mock_build_cmd.assert_called_once()
         mock_cmd.run_async.assert_called_once_with(pipe_stderr=True, pipe_stdin=True)
 
-    @patch("pikaraoke.lib.stream_manager.Thread")
-    @patch("pikaraoke.lib.stream_manager.build_ffmpeg_cmd")
+    @patch("biaoke.lib.stream_manager.Thread")
+    @patch("biaoke.lib.stream_manager.build_ffmpeg_cmd")
     def test_transcode_ffmpeg_error(self, mock_build_cmd, mock_thread, test_prefs):
         """Test transcoding failure when FFmpeg exits with non-zero code."""
         sm = StreamManager(test_prefs)
@@ -367,8 +367,8 @@ class TestStreamManagerTranscodeFile:
         assert is_complete is False
         assert is_buffered is False
 
-    @patch("pikaraoke.lib.stream_manager.Thread")
-    @patch("pikaraoke.lib.stream_manager.build_ffmpeg_cmd")
+    @patch("biaoke.lib.stream_manager.Thread")
+    @patch("biaoke.lib.stream_manager.build_ffmpeg_cmd")
     def test_transcode_buffering_complete_before_finish(
         self, mock_build_cmd, mock_thread, test_prefs
     ):
@@ -384,8 +384,8 @@ class TestStreamManagerTranscodeFile:
         assert is_complete is False
         assert is_buffered is True
 
-    @patch("pikaraoke.lib.stream_manager.Thread")
-    @patch("pikaraoke.lib.stream_manager.build_ffmpeg_cmd")
+    @patch("biaoke.lib.stream_manager.Thread")
+    @patch("biaoke.lib.stream_manager.build_ffmpeg_cmd")
     def test_transcode_hls_buffering(self, mock_build_cmd, mock_thread, test_prefs):
         """Test HLS buffering check is used when is_hls=True."""
         sm = StreamManager(test_prefs)
@@ -399,9 +399,9 @@ class TestStreamManagerTranscodeFile:
         mock_hls.assert_called()
         assert is_buffered is True
 
-    @patch("pikaraoke.lib.stream_manager.time")
-    @patch("pikaraoke.lib.stream_manager.Thread")
-    @patch("pikaraoke.lib.stream_manager.build_ffmpeg_cmd")
+    @patch("biaoke.lib.stream_manager.time")
+    @patch("biaoke.lib.stream_manager.Thread")
+    @patch("biaoke.lib.stream_manager.build_ffmpeg_cmd")
     def test_transcode_max_retries_exceeded(
         self, mock_build_cmd, mock_thread, mock_time, test_prefs
     ):
@@ -417,8 +417,8 @@ class TestStreamManagerTranscodeFile:
         assert is_complete is False
         assert is_buffered is False
 
-    @patch("pikaraoke.lib.stream_manager.Thread")
-    @patch("pikaraoke.lib.stream_manager.build_ffmpeg_cmd")
+    @patch("biaoke.lib.stream_manager.Thread")
+    @patch("biaoke.lib.stream_manager.build_ffmpeg_cmd")
     def test_transcode_kills_existing_ffmpeg(self, mock_build_cmd, mock_thread, test_prefs):
         """Test that _transcode_file kills any existing FFmpeg process first."""
         sm = StreamManager(test_prefs)
@@ -446,7 +446,7 @@ class TestStreamManagerPlayFile:
         return mock_fr
 
     @patch("flask_babel._", side_effect=lambda x: x)
-    @patch("pikaraoke.lib.stream_manager.FileResolver")
+    @patch("biaoke.lib.stream_manager.FileResolver")
     def test_play_file_returns_error_result_on_resolve_error(
         self, mock_resolver_class, mock_gettext, test_prefs
     ):
@@ -461,8 +461,8 @@ class TestStreamManagerPlayFile:
         assert result.error is not None
 
     @patch("flask_babel._", side_effect=lambda x: x)
-    @patch("pikaraoke.lib.stream_manager.is_transcoding_required", return_value=False)
-    @patch("pikaraoke.lib.stream_manager.FileResolver")
+    @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=False)
+    @patch("biaoke.lib.stream_manager.FileResolver")
     def test_play_file_copies_when_no_transcoding_needed(
         self, mock_resolver_class, mock_transcode_check, mock_gettext, test_prefs
     ):
@@ -479,8 +479,8 @@ class TestStreamManagerPlayFile:
         assert result.duration == 180
 
     @patch("flask_babel._", side_effect=lambda x: x)
-    @patch("pikaraoke.lib.stream_manager.is_transcoding_required", return_value=False)
-    @patch("pikaraoke.lib.stream_manager.FileResolver")
+    @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=False)
+    @patch("biaoke.lib.stream_manager.FileResolver")
     def test_play_file_hls_stream_url(
         self, mock_resolver_class, mock_transcode_check, mock_gettext, test_prefs
     ):
@@ -495,8 +495,8 @@ class TestStreamManagerPlayFile:
         assert result.stream_url == "/stream/12345.m3u8"
 
     @patch("flask_babel._", side_effect=lambda x: x)
-    @patch("pikaraoke.lib.stream_manager.is_transcoding_required", return_value=True)
-    @patch("pikaraoke.lib.stream_manager.FileResolver")
+    @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=True)
+    @patch("biaoke.lib.stream_manager.FileResolver")
     def test_play_file_mp4_progressive_stream_url(
         self, mock_resolver_class, mock_transcode_check, mock_gettext, test_prefs
     ):
@@ -511,8 +511,8 @@ class TestStreamManagerPlayFile:
         assert result.stream_url == "/stream/12345.mp4"
 
     @patch("flask_babel._", side_effect=lambda x: x)
-    @patch("pikaraoke.lib.stream_manager.is_transcoding_required", return_value=True)
-    @patch("pikaraoke.lib.stream_manager.FileResolver")
+    @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=True)
+    @patch("biaoke.lib.stream_manager.FileResolver")
     def test_play_file_mp4_full_transcode_url(
         self, mock_resolver_class, mock_transcode_check, mock_gettext, test_prefs
     ):
@@ -528,8 +528,8 @@ class TestStreamManagerPlayFile:
         assert result.stream_url == "/stream/full/12345"
 
     @patch("flask_babel._", side_effect=lambda x: x)
-    @patch("pikaraoke.lib.stream_manager.is_transcoding_required", return_value=False)
-    @patch("pikaraoke.lib.stream_manager.FileResolver")
+    @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=False)
+    @patch("biaoke.lib.stream_manager.FileResolver")
     def test_play_file_includes_subtitle_url(
         self, mock_resolver_class, mock_transcode_check, mock_gettext, test_prefs
     ):
@@ -544,8 +544,8 @@ class TestStreamManagerPlayFile:
         assert result.subtitle_url == "/subtitle/12345"
 
     @patch("flask_babel._", side_effect=lambda x: x)
-    @patch("pikaraoke.lib.stream_manager.is_transcoding_required", return_value=True)
-    @patch("pikaraoke.lib.stream_manager.FileResolver")
+    @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=True)
+    @patch("biaoke.lib.stream_manager.FileResolver")
     def test_play_file_returns_failure_when_stream_not_ready(
         self, mock_resolver_class, mock_transcode_check, mock_gettext, test_prefs
     ):

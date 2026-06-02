@@ -13,8 +13,8 @@ from flask_paginate import Pagination, get_page_parameter
 from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
-from pikaraoke.lib.current_app import get_karaoke_instance, get_site_name, is_admin
-from pikaraoke.lib.metadata_parser import youtube_id_suffix
+from biaoke.lib.current_app import get_karaoke_instance, get_site_name, is_admin
+from biaoke.lib.metadata_parser import youtube_id_suffix
 
 _ = flask_babel.gettext
 

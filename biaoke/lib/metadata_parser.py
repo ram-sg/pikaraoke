@@ -739,7 +739,7 @@ def youtube_id_suffix(file_path: str) -> str:
 
 
 def has_youtube_id(filename: str) -> bool:
-    """Detect if a filename contains a YouTube ID in PiKaraoke or yt-dlp format."""
+    """Detect if a filename contains a YouTube ID in Biaoke or yt-dlp format."""
     return bool(youtube_id_suffix(filename))
 
 

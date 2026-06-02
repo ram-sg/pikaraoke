@@ -11,10 +11,10 @@ RUN apt-get update && \
 
 RUN pip install --no-cache-dir fastapi "uvicorn[standard]" python-multipart torchcrepe
 
-RUN mkdir -p /app/pikaraoke/lib /app/scoring_service && \
-    touch /app/pikaraoke/__init__.py /app/pikaraoke/lib/__init__.py /app/scoring_service/__init__.py
+RUN mkdir -p /app/biaoke/lib /app/scoring_service && \
+    touch /app/biaoke/__init__.py /app/biaoke/lib/__init__.py /app/scoring_service/__init__.py
 
-COPY pikaraoke/lib/scoring.py /app/pikaraoke/lib/scoring.py
+COPY biaoke/lib/scoring.py /app/biaoke/lib/scoring.py
 COPY scoring_service/app.py /app/scoring_service/app.py
 
 EXPOSE 8765

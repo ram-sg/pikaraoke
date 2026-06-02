@@ -1,4 +1,4 @@
-# Indonesian translations for Pikaraoke
+# Indonesian translations for Biaoke
 # Copyright (C) 2024 ORGANIZATION
 # This file is distributed under the same license as the project.
 #
@@ -170,12 +170,12 @@ msgstr "Sedang memperbarui yt-dlp! Mohon tunggu 1–2 menit..."
 msgid "You don't have permission to update yt-dlp"
 msgstr "Anda tidak memiliki izin untuk memperbarui yt-dlp"
 
-#. Message shown after quitting pikaraoke.
+#. Message shown after quitting biaoke.
 #: routes/admin.py:97
-msgid "Exiting pikaraoke now!"
-msgstr "Menutup Pikaraoke sekarang!"
+msgid "Exiting biaoke now!"
+msgstr "Menutup Biaoke sekarang!"
 
-#. Message shown after trying to quit pikaraoke without admin permissions.
+#. Message shown after trying to quit biaoke without admin permissions.
 #: routes/admin.py:104
 msgid "You don't have permission to quit"
 msgstr "Anda tidak memiliki izin untuk keluar"
@@ -743,7 +743,7 @@ msgid "Are you sure you want to quit?"
 msgstr "Yakin ingin keluar dari aplikasi?"
 
 #. Confirmation text whe the user starts to turn off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:75
 msgid "Are you sure you want to shut down?"
 msgstr "Yakin ingin mematikan perangkat?"
@@ -754,7 +754,7 @@ msgid "Are you sure you want to clear your preferences?"
 msgstr "Yakin ingin menghapus semua pengaturan Anda?"
 
 #. Confirmation text whe the user starts to reboot the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:91
 msgid "Are you sure you want to reboot?"
 msgstr "Yakin ingin merestart perangkat?"
@@ -1033,7 +1033,7 @@ msgstr "Hapus pengaturan"
 msgid "System Data"
 msgstr "Data Sistem"
 
-#. Header of the information section about the computer running Pikaraoke.
+#. Header of the information section about the computer running Biaoke.
 #: templates/info.html:483
 msgid "System Info"
 msgstr "Informasi Sistem"
@@ -1058,17 +1058,17 @@ msgstr "Versi yt-dlp:"
 msgid "FFmpeg version:"
 msgstr "Versi FFmpeg:"
 
-#. The version of Pikaraoke running right now.
+#. The version of Biaoke running right now.
 #: templates/info.html:497
-msgid "Pikaraoke version:"
-msgstr "Versi Pikaraoke:"
+msgid "Biaoke version:"
+msgstr "Versi Biaoke:"
 
 #. Header of the information section about the System stats.
 #: templates/info.html:503
 msgid "System stats"
 msgstr "Statistik Sistem"
 
-#. The CPU usage of the computer running Pikaraoke.
+#. The CPU usage of the computer running Biaoke.
 #: templates/info.html:509
 msgid "CPU:"
 msgstr "CPU:"
@@ -1078,12 +1078,12 @@ msgstr "CPU:"
 msgid "Loading..."
 msgstr "Memuat..."
 
-#. The disk usage of the computer running Pikaraoke. Used by downloaded songs.
+#. The disk usage of the computer running Biaoke. Used by downloaded songs.
 #: templates/info.html:511
 msgid "Disk Usage:"
 msgstr "Penggunaan Disk:"
 
-#. The memory (RAM) usage of the computer running Pikaraoke.
+#. The memory (RAM) usage of the computer running Biaoke.
 #: templates/info.html:513
 msgid "Memory:"
 msgstr "Memori:"
@@ -1114,23 +1114,23 @@ msgstr ""
 "\t\t\t\t\t\tVersi terinstal saat ini adalah: \"%(youtubedl_version)s\"."
 
 #. Text for the link which will try and update yt-dlp on the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:536
 msgid "Update yt-dlp"
 msgstr "Perbarui yt-dlp"
 
 # auto-translated
 #. Help text which explains why updating yt-dlp can fail. The log is a file on
-#. the machine running Pikaraoke.
+#. the machine running Biaoke.
 #: templates/info.html:540
 msgid ""
 "* This update link above may fail if you don't have proper file "
 "permissions.\n"
-"\t\t\t\t\t\t\tCheck the pikaraoke log for errors."
+"\t\t\t\t\t\t\tCheck the biaoke log for errors."
 msgstr ""
 "* Tautan pembaruan di atas mungkin gagal jika Anda tidak memiliki izin "
 "file yang tepat.\n"
-"\t\t\t\t\t\t\tPeriksa log pikaraoke untuk kesalahan."
+"\t\t\t\t\t\t\tPeriksa log biaoke untuk kesalahan."
 
 #. Title of the updates section.
 #: templates/info.html:552
@@ -1148,13 +1148,13 @@ msgstr "Perluas partisi Raspberry Pi"
 #. filesystem.
 #: templates/info.html:562
 msgid ""
-"If you just installed the pre-built pikaraoke pi image and your SD card "
+"If you just installed the pre-built biaoke pi image and your SD card "
 "is larger than 4GB,\n"
 "\t\t\t\t\t\t\tyou may want to expand the filesystem to utilize the "
 "remaining space. You only need to do this once.\n"
 "\t\t\t\t\t\t\tThis will reboot the system."
 msgstr ""
-"Jika Anda baru saja memasang gambar pikaraoke pi bawaan dan kartu SD Anda"
+"Jika Anda baru saja memasang gambar biaoke pi bawaan dan kartu SD Anda"
 " lebih besar dari 4 GB,\n"
 "\t\t\t\t\t\t\tAnda mungkin ingin memperluas sistem file untuk "
 "memanfaatkan ruang yang tersisa. Anda hanya perlu melakukan ini sekali "
@@ -1172,7 +1172,7 @@ msgid "Log out"
 msgstr "Keluar"
 
 #. Title of the section on shutting down / turning off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:593
 msgid "Shutdown"
 msgstr "Matikan"
@@ -1186,18 +1186,18 @@ msgstr ""
 "Jangan langsung mencabut kabel! Matikan server dengan benar agar data "
 "tidak rusak."
 
-#. Text for button which turns off Pikaraoke for everyone using it at your
+#. Text for button which turns off Biaoke for everyone using it at your
 #. house.
 #: templates/info.html:607
-msgid "Quit Pikaraoke"
-msgstr "Keluar dari Pikaraoke"
+msgid "Quit Biaoke"
+msgstr "Keluar dari Biaoke"
 
-#. Text for button which reboots the machine running Pikaraoke.
+#. Text for button which reboots the machine running Biaoke.
 #: templates/info.html:610
 msgid "Reboot System"
 msgstr "Restart Sistem"
 
-#. Text for button which turn soff the machine running Pikaraoke.
+#. Text for button which turn soff the machine running Biaoke.
 #: templates/info.html:613
 msgid "Shutdown System"
 msgstr "Matikan Sistem"
@@ -1425,14 +1425,14 @@ msgstr "Skor Anda"
 #: templates/splash.html:132
 msgid ""
 "Due to limitations with browser permissions, you must interact\n"
-"      with the page once before it allows autoplay of videos. Pikaraoke "
+"      with the page once before it allows autoplay of videos. Biaoke "
 "will not\n"
 "      play otherwise. Click the button below to\n"
 "      <a onClick=\"handleConfirmation()\">confirm</a>."
 msgstr ""
 "Karena keterbatasan izin browser, Anda harus berinteraksi\n"
 "      dengan halaman satu kali sebelum mengizinkan pemutaran otomatis "
-"video. Pikaraoke tidak akan melakukannya\n"
+"video. Biaoke tidak akan melakukannya\n"
 "      bermain sebaliknya. Klik tombol di bawah untuk\n"
 "      <a onClick=\"handleConfirmation()\">konfirmasi</a>."
 

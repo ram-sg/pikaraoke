@@ -9,10 +9,10 @@ from flask import Flask
 if not hasattr(werkzeug, "__version__"):
     werkzeug.__version__ = "3.0.0"
 
-from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.lib.queue_manager import QueueManager
-from pikaraoke.routes.queue import queue_bp
+from biaoke.lib.events import EventSystem
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.queue_manager import QueueManager
+from biaoke.routes.queue import queue_bp
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def client(app):
 class TestQueueRoutes:
     """Tests for queue routes."""
 
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.get_karaoke_instance")
     def test_get_current_downloads(self, mock_get_instance, client):
         """Test the get_current_downloads route."""
         mock_karaoke = MagicMock()
@@ -48,7 +48,7 @@ class TestQueueRoutes:
         data = json.loads(response.data)
         assert data == expected_status
 
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.get_karaoke_instance")
     def test_delete_download_error(self, mock_get_instance, client):
         """Test the delete_download_error route."""
         mock_karaoke = MagicMock()
@@ -74,7 +74,7 @@ class TestQueueApiContract:
     The queue and home pages depend on these endpoints returning specific fields.
     """
 
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.get_karaoke_instance")
     def test_get_queue_returns_required_fields(self, mock_get_instance, client):
         """GET /get_queue must return all fields the frontend expects."""
         mock_karaoke = MagicMock()
@@ -101,7 +101,7 @@ class TestQueueApiContract:
         assert "title" in item
         assert "semitones" in item
 
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.get_karaoke_instance")
     def test_get_queue_empty_returns_empty_array(self, mock_get_instance, client):
         """GET /get_queue must return empty array when queue is empty."""
         mock_karaoke = MagicMock()
@@ -178,10 +178,10 @@ class TestQueueEditSocketUpdates:
             ("clear", ""),
         ],
     )
-    @patch("pikaraoke.routes.queue.is_admin", return_value=True)
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
-    @patch("pikaraoke.routes.queue.broadcast_event")
-    @patch("pikaraoke.routes.queue._", side_effect=lambda x: x)
+    @patch("biaoke.routes.queue.is_admin", return_value=True)
+    @patch("biaoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.broadcast_event")
+    @patch("biaoke.routes.queue._", side_effect=lambda x: x)
     def test_queue_edit_emits_events(
         self,
         mock_gettext,
@@ -211,9 +211,9 @@ class TestQueueEditSocketUpdates:
             ("bottom", "&song=/songs/song1.mp4", 2),
         ],
     )
-    @patch("pikaraoke.routes.queue.is_admin", return_value=True)
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
-    @patch("pikaraoke.routes.queue._", side_effect=lambda x: x)
+    @patch("biaoke.routes.queue.is_admin", return_value=True)
+    @patch("biaoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue._", side_effect=lambda x: x)
     def test_queue_edit_top_bottom_emits_events(
         self,
         mock_gettext,
@@ -237,8 +237,8 @@ class TestQueueEditSocketUpdates:
         assert len(queue_updates) == 1, "queue_update event should be emitted once"
         assert len(now_playing_updates) == 1, "now_playing_update event should be emitted once"
 
-    @patch("pikaraoke.routes.queue.is_admin", return_value=True)
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.is_admin", return_value=True)
+    @patch("biaoke.routes.queue.get_karaoke_instance")
     def test_queue_reorder_drag_drop_emits_events(
         self, mock_get_instance, mock_is_admin, client_with_session, queue_env
     ):

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pikaraoke.lib.file_resolver import (
+from biaoke.lib.file_resolver import (
     FileResolver,
     create_tmp_dir,
     delete_tmp_dir,
@@ -160,7 +160,7 @@ class TestCreateTmpDir:
     def test_creates_directory(self, tmp_path):
         """Test that create_tmp_dir creates the directory."""
         with patch(
-            "pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path / "test_tmp")
+            "biaoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path / "test_tmp")
         ):
             create_tmp_dir()
             assert (tmp_path / "test_tmp").exists()
@@ -169,7 +169,7 @@ class TestCreateTmpDir:
         """Test that create_tmp_dir doesn't fail if dir exists."""
         test_dir = tmp_path / "test_tmp"
         test_dir.mkdir()
-        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(test_dir)):
+        with patch("biaoke.lib.file_resolver.get_tmp_dir", return_value=str(test_dir)):
             create_tmp_dir()  # Should not raise
             assert test_dir.exists()
 
@@ -183,14 +183,14 @@ class TestDeleteTmpDir:
         test_dir.mkdir()
         (test_dir / "file.txt").write_text("test")
 
-        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(test_dir)):
+        with patch("biaoke.lib.file_resolver.get_tmp_dir", return_value=str(test_dir)):
             delete_tmp_dir()
             assert not test_dir.exists()
 
     def test_handles_nonexistent_dir(self, tmp_path):
         """Test that delete_tmp_dir handles nonexistent directory."""
         with patch(
-            "pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path / "nonexistent")
+            "biaoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path / "nonexistent")
         ):
             delete_tmp_dir()  # Should not raise
 
@@ -198,9 +198,9 @@ class TestDeleteTmpDir:
 class TestFileResolverInit:
     """Tests for FileResolver initialization."""
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_init_mp4_file(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test FileResolver initialization with MP4 file."""
         test_file = tmp_path / "song.mp4"
@@ -215,9 +215,9 @@ class TestFileResolverInit:
         assert fr.streaming_format == "hls"
         assert ".m3u8" in fr.output_file
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=200)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=200)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_init_mp4_streaming_format(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test FileResolver with mp4 streaming format."""
         test_file = tmp_path / "song.mp4"
@@ -228,9 +228,9 @@ class TestFileResolverInit:
         assert fr.streaming_format == "mp4"
         assert ".mp4" in fr.output_file
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_init_sets_segment_pattern(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test that init sets segment pattern and init filename."""
         test_file = tmp_path / "song.mp4"
@@ -245,9 +245,9 @@ class TestFileResolverInit:
 class TestFileResolverHandleAegissubSubtitle:
     """Tests for FileResolver.handle_aegissub_subtile method."""
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_finds_ass_file(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test finding .ass subtitle file."""
         video_file = tmp_path / "song.mp4"
@@ -259,9 +259,9 @@ class TestFileResolverHandleAegissubSubtitle:
 
         assert fr.ass_file_path == str(ass_file)
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_finds_uppercase_ass_file(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test finding .ASS subtitle file (uppercase)."""
         video_file = tmp_path / "song.mp4"
@@ -273,9 +273,9 @@ class TestFileResolverHandleAegissubSubtitle:
 
         assert fr.ass_file_path.casefold() == str(ass_file).casefold()
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_no_ass_file(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test when no .ass file exists."""
         video_file = tmp_path / "song.mp4"
@@ -289,9 +289,9 @@ class TestFileResolverHandleAegissubSubtitle:
 class TestFileResolverHandleMp3Cdg:
     """Tests for FileResolver.handle_mp3_cdg method."""
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_finds_cdg_file(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test finding .cdg file for MP3."""
         mp3_file = tmp_path / "song.mp3"
@@ -304,9 +304,9 @@ class TestFileResolverHandleMp3Cdg:
         assert fr.file_path == str(mp3_file)
         assert fr.cdg_file_path == str(cdg_file)
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_finds_uppercase_cdg_file(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test finding .CDG file (uppercase)."""
         mp3_file = tmp_path / "song.mp3"
@@ -318,8 +318,8 @@ class TestFileResolverHandleMp3Cdg:
 
         assert fr.cdg_file_path.casefold() == str(cdg_file).casefold()
 
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_raises_when_no_cdg(self, mock_tmp, mock_create, tmp_path):
         """Test that exception is raised when no CDG file exists."""
         mp3_file = tmp_path / "song.mp3"
@@ -332,8 +332,8 @@ class TestFileResolverHandleMp3Cdg:
 class TestFileResolverHandleZippedCdg:
     """Tests for FileResolver.handle_zipped_cdg method."""
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
     def test_extracts_valid_zip(self, mock_create, mock_duration, tmp_path):
         """Test extracting valid CDG zip file."""
         # Create a valid CDG zip
@@ -344,7 +344,7 @@ class TestFileResolverHandleZippedCdg:
             zf.writestr("track.mp3", b"fake mp3 data")
             zf.writestr("track.cdg", b"fake cdg data")
 
-        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+        with patch("biaoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
             fr = FileResolver(str(zip_path))
 
         assert fr.file_path is not None
@@ -352,7 +352,7 @@ class TestFileResolverHandleZippedCdg:
         assert fr.cdg_file_path is not None
         assert "track.cdg" in fr.cdg_file_path
 
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
     def test_raises_when_zip_missing_cdg(self, mock_create, tmp_path):
         """Test exception when zip has MP3 but no CDG."""
         zip_path = tmp_path / "song.zip"
@@ -360,11 +360,11 @@ class TestFileResolverHandleZippedCdg:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("track.mp3", b"fake mp3 data")
 
-        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+        with patch("biaoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
             with pytest.raises(Exception, match="No .mp3 or .cdg was found"):
                 FileResolver(str(zip_path))
 
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
     def test_raises_when_zip_mismatched_names(self, mock_create, tmp_path):
         """Test exception when MP3 and CDG have different base names."""
         zip_path = tmp_path / "song.zip"
@@ -373,7 +373,7 @@ class TestFileResolverHandleZippedCdg:
             zf.writestr("track1.mp3", b"fake mp3 data")
             zf.writestr("track2.cdg", b"fake cdg data")
 
-        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+        with patch("biaoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
             with pytest.raises(Exception, match="did not have a matching .cdg file"):
                 FileResolver(str(zip_path))
 
@@ -381,14 +381,14 @@ class TestFileResolverHandleZippedCdg:
 class TestFileResolverGetCurrentStreamSize:
     """Tests for FileResolver.get_current_stream_size method."""
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
     def test_calculates_stream_size(self, mock_create, mock_duration, tmp_path):
         """Test calculating size of stream files."""
         video_file = tmp_path / "song.mp4"
         video_file.touch()
 
-        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+        with patch("biaoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
             fr = FileResolver(str(video_file))
 
             # Create some fake stream segment files
@@ -401,14 +401,14 @@ class TestFileResolverGetCurrentStreamSize:
 
             assert size == 3000
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
     def test_returns_zero_when_no_segments(self, mock_create, mock_duration, tmp_path):
         """Test returns 0 when no stream segments exist."""
         video_file = tmp_path / "song.mp4"
         video_file.touch()
 
-        with patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
+        with patch("biaoke.lib.file_resolver.get_tmp_dir", return_value=str(tmp_path)):
             fr = FileResolver(str(video_file))
             size = fr.get_current_stream_size()
 
@@ -418,9 +418,9 @@ class TestFileResolverGetCurrentStreamSize:
 class TestFileResolverProcessFile:
     """Tests for FileResolver.process_file method."""
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_process_mp4(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test processing MP4 file."""
         video_file = tmp_path / "song.mp4"
@@ -432,9 +432,9 @@ class TestFileResolverProcessFile:
         assert fr.file_path == str(video_file)
         assert fr.cdg_file_path is None
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_process_webm(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test processing WebM file."""
         video_file = tmp_path / "song.webm"
@@ -445,9 +445,9 @@ class TestFileResolverProcessFile:
         assert fr.file_extension == ".webm"
         assert fr.file_path == str(video_file)
 
-    @patch("pikaraoke.lib.file_resolver.get_media_duration", return_value=180)
-    @patch("pikaraoke.lib.file_resolver.create_tmp_dir")
-    @patch("pikaraoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_process_mkv(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test processing MKV file."""
         video_file = tmp_path / "song.mkv"

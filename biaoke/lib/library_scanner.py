@@ -5,9 +5,9 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 
-from pikaraoke.lib.karaoke_database import KaraokeDatabase
-from pikaraoke.lib.metadata_parser import youtube_id_suffix
-from pikaraoke.lib.song_list import SongList
+from biaoke.lib.karaoke_database import KaraokeDatabase
+from biaoke.lib.metadata_parser import youtube_id_suffix
+from biaoke.lib.song_list import SongList
 
 _VALID_EXTENSIONS = SongList.VALID_EXTENSIONS
 
@@ -44,7 +44,7 @@ def build_song_record(
 
 
 def _extract_youtube_id(file_path: str) -> str | None:
-    """Extract YouTube ID from PiKaraoke (---ID) or yt-dlp ([ID]) format."""
+    """Extract YouTube ID from Biaoke (---ID) or yt-dlp ([ID]) format."""
     suffix = youtube_id_suffix(file_path)
     if not suffix:
         return None

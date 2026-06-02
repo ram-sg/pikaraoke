@@ -5,15 +5,15 @@ import psutil
 from flask import jsonify, render_template
 from flask_smorest import Blueprint
 
-from pikaraoke import VERSION
-from pikaraoke.constants import LANGUAGES
-from pikaraoke.lib.current_app import (
+from biaoke import VERSION
+from biaoke.constants import LANGUAGES
+from biaoke.lib.current_app import (
     get_admin_password,
     get_karaoke_instance,
     get_site_name,
     is_admin,
 )
-from pikaraoke.lib.get_platform import get_platform
+from biaoke.lib.get_platform import get_platform
 
 _ = flask_babel.gettext
 
@@ -46,7 +46,7 @@ def info():
         ffmpeg_version=k.ffmpeg_version,
         is_transpose_enabled=k.is_transpose_enabled,
         youtubedl_version=youtubedl_version,
-        pikaraoke_version=VERSION,
+        biaoke_version=VERSION,
         cpu=None,
         memory=None,
         disk=None,

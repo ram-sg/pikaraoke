@@ -11,7 +11,7 @@ from flask import Flask
 if not hasattr(werkzeug, "__version__"):
     werkzeug.__version__ = "3.0.0"
 
-from pikaraoke.routes.now_playing import nowplaying_bp
+from biaoke.routes.now_playing import nowplaying_bp
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ class TestNowPlayingApiContract:
     These tests prevent regressions where API changes break the frontend.
     """
 
-    @patch("pikaraoke.routes.now_playing.get_karaoke_instance")
+    @patch("biaoke.routes.now_playing.get_karaoke_instance")
     def test_now_playing_returns_all_required_fields(self, mock_get_instance, client):
         """GET /now_playing must return all fields the frontend expects."""
         mock_karaoke = MagicMock()
@@ -68,7 +68,7 @@ class TestNowPlayingApiContract:
         assert "is_paused" in data
         assert "volume" in data
 
-    @patch("pikaraoke.routes.now_playing.get_karaoke_instance")
+    @patch("biaoke.routes.now_playing.get_karaoke_instance")
     def test_now_playing_with_nothing_playing(self, mock_get_instance, client):
         """GET /now_playing with nothing playing returns null values correctly."""
         mock_karaoke = MagicMock()
@@ -93,7 +93,7 @@ class TestNowPlayingApiContract:
         assert data["now_playing"] is None
         assert data["up_next"] is None
 
-    @patch("pikaraoke.routes.now_playing.get_karaoke_instance")
+    @patch("biaoke.routes.now_playing.get_karaoke_instance")
     def test_now_playing_up_next_reflects_queue(self, mock_get_instance, client):
         """GET /now_playing up_next should reflect first item in queue."""
         mock_karaoke = MagicMock()

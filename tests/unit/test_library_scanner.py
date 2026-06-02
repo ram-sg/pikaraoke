@@ -2,8 +2,8 @@
 
 import pytest
 
-from pikaraoke.lib.karaoke_database import KaraokeDatabase
-from pikaraoke.lib.library_scanner import (
+from biaoke.lib.karaoke_database import KaraokeDatabase
+from biaoke.lib.library_scanner import (
     LibraryScanner,
     _extract_youtube_id,
     build_song_record,
@@ -372,7 +372,7 @@ class TestBuildSongRecord:
 
 
 class TestExtractYoutubeId:
-    def test_pikaraoke_format(self):
+    def test_biaoke_format(self):
         assert _extract_youtube_id("Song---dQw4w9WgXcQ.mp4") == "dQw4w9WgXcQ"
 
     def test_ytdlp_format(self):
@@ -381,7 +381,7 @@ class TestExtractYoutubeId:
     def test_no_id(self):
         assert _extract_youtube_id("Just A Song.mp4") is None
 
-    def test_pikaraoke_preferred_over_ytdlp(self):
-        # PiKaraoke format takes priority
+    def test_biaoke_preferred_over_ytdlp(self):
+        # Biaoke format takes priority
         result = _extract_youtube_id("Song [AAAAAAAAAAA]---BBBBBBBBBBB.mp4")
         assert result == "BBBBBBBBBBB"

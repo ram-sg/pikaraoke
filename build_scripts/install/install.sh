@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# PiKaraoke One-Line Installer
+# Biaoke One-Line Installer
 # Supports macOS (Homebrew) and Linux (apt-get)
 
 set -e
@@ -12,7 +12,7 @@ LOCAL="n"
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -y|--yes) CONFIRM="n" ;;
-        -l|--local) LOCAL="y" ;; # this installs pikaraoke from local source
+        -l|--local) LOCAL="y" ;; # this installs biaoke from local source
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
@@ -20,7 +20,7 @@ done
 
 # Detect OS
 OS_TYPE="$(uname -s)"
-echo "--- PiKaraoke Installer ---"
+echo "--- Biaoke Installer ---"
 echo "Detected OS: $OS_TYPE"
 
 # Determine packages to install
@@ -54,9 +54,9 @@ fi
 
 DISPLAY_LIST=$(IFS=", "; echo "${DISPLAY_PKGS[*]}")
 if [ -z "$DISPLAY_LIST" ]; then
-    INSTALL_LIST="pikaraoke (via uv)"
+    INSTALL_LIST="biaoke (via uv)"
 else
-    INSTALL_LIST="$DISPLAY_LIST, pikaraoke (via uv)"
+    INSTALL_LIST="$DISPLAY_LIST, biaoke (via uv)"
 fi
 
 echo "The following packages will be installed/updated: $INSTALL_LIST"
@@ -152,32 +152,32 @@ else
     exit 1
 fi
 
-# Install pikaraoke
-echo "Installing pikaraoke via uv..."
+# Install biaoke
+echo "Installing biaoke via uv..."
 
-if uv tool list | grep -q "pikaraoke"; then
-    echo "PiKaraoke is already installed. Upgrading..."
+if uv tool list | grep -q "biaoke"; then
+    echo "Biaoke is already installed. Upgrading..."
     if [ "$LOCAL" == "y" ]; then
         uv tool install --force .
     else
-        uv tool upgrade pikaraoke
+        uv tool upgrade biaoke
     fi
 else
     if [ "$LOCAL" == "y" ]; then
         uv tool install .
     else
-        uv tool install pikaraoke
+        uv tool install biaoke
     fi
 fi
 
 # 6. Create Desktop Shortcuts
 if [ $INSTALL_SHORTCUTS -eq 1 ]; then
     echo "Creating Desktop Shortcuts..."
-    PIKARAOKE_BIN=$(command -v pikaraoke || echo "$HOME/.local/bin/pikaraoke")
-    SHARE_DIR="$HOME/.local/share/pikaraoke"
+    BIAOKE_BIN=$(command -v biaoke || echo "$HOME/.local/bin/biaoke")
+    SHARE_DIR="$HOME/.local/share/biaoke"
     mkdir -p "$SHARE_DIR"
     ICON_PATH="$SHARE_DIR/logo.icns"
-    ICON_URL="https://raw.githubusercontent.com/vicwomg/pikaraoke/refs/heads/master/pikaraoke/static/icons/logo.icns"
+    ICON_URL="https://raw.githubusercontent.com/vicwomg/biaoke/refs/heads/master/biaoke/static/icons/logo.icns"
     if [ ! -f "$ICON_PATH" ]; then
         curl -fsSL "$ICON_URL" -o "$ICON_PATH" || echo "Warning: Could not download icon"
     fi
@@ -193,7 +193,7 @@ if [ $INSTALL_SHORTCUTS -eq 1 ]; then
             # We use 'do script' to ensure it runs in a shell with user paths (ffmpeg, etc)
             osacompile -o "$app_path" -e "tell application \"Terminal\"
                 activate
-                do script \"$PIKARAOKE_BIN $args\"
+                do script \"$BIAOKE_BIN $args\"
             end tell"
 
             if [ -f "$ICON_PATH" ]; then
@@ -211,8 +211,8 @@ EOF
             fi
         }
 
-        create_macos_app "PiKaraoke" ""
-        create_macos_app "PiKaraoke (headless)" "--headless"
+        create_macos_app "Biaoke" ""
+        create_macos_app "Biaoke (headless)" "--headless"
         echo "macOS shortcuts created on Desktop."
 
     elif [ "$OS_TYPE" == "Linux" ]; then
@@ -228,7 +228,7 @@ EOF
 Version=1.0
 Type=Application
 Name=$name
-Exec=$PIKARAOKE_BIN $args
+Exec=$BIAOKE_BIN $args
 Icon=$ICON_PATH
 Terminal=true
 Categories=AudioVideo;Player;
@@ -237,8 +237,8 @@ EOF
         }
 
         if [ -d "$HOME/Desktop" ]; then
-            create_linux_desktop "PiKaraoke" "" "PiKaraoke.desktop"
-            create_linux_desktop "PiKaraoke (headless)" "--headless" "PiKaraoke-headless.desktop"
+            create_linux_desktop "Biaoke" "" "Biaoke.desktop"
+            create_linux_desktop "Biaoke (headless)" "--headless" "Biaoke-headless.desktop"
             echo "Linux shortcuts created on Desktop."
         else
             echo "Warning: Desktop directory not found. Skipping shortcut creation."
@@ -250,7 +250,7 @@ echo ""
 echo "--------------------------------------------------------"
 echo "Installation complete!"
 echo "Please restart your terminal or run 'source ~/.bashrc' (or ~/.zshrc) for PATH changes to take effect."
-echo "Then, simply run: pikaraoke"
+echo "Then, simply run: biaoke"
 if [ $INSTALL_SHORTCUTS -eq 1 ]; then
     echo "Or use the shortcuts created on the Desktop."
 fi

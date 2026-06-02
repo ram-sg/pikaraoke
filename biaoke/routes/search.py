@@ -9,8 +9,8 @@ from flask import current_app, jsonify, render_template, request, url_for
 from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
-from pikaraoke.lib.current_app import get_karaoke_instance, get_site_name
-from pikaraoke.lib.youtube_dl import get_search_results, get_stream_url
+from biaoke.lib.current_app import get_karaoke_instance, get_site_name
+from biaoke.lib.youtube_dl import get_search_results, get_stream_url
 
 _ = flask_babel.gettext
 

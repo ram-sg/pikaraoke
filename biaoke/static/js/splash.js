@@ -10,11 +10,11 @@ let volume = 0.85;
 const playbackStartTimeout = 10000;
 const bgMediaResumeDelay = 2000;
 let isScoreShown = false;
-const hasBgVideo = PikaraokeConfig.hasBgVideo;
+const hasBgVideo = BiaokeConfig.hasBgVideo;
 let currentVideoUrl = null;
 let hlsInstance = null;
 let idleTime = 0;
-let screensaverTimeoutSeconds = PikaraokeConfig.screensaverTimeout;
+let screensaverTimeoutSeconds = BiaokeConfig.screensaverTimeout;
 let bg_playlist = [];
 let bgMediaResumeTimeout = null;
 let scoreReviews = {
@@ -120,7 +120,7 @@ const getScoreMimeType = () => {
 }
 
 const setupScoreCapture = async () => {
-  if (scoreCaptureReady || PikaraokeConfig.disableScore) return;
+  if (scoreCaptureReady || BiaokeConfig.disableScore) return;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
     console.log("Microphone scoring is not supported in this browser.");
     return;
@@ -141,7 +141,7 @@ const setupScoreCapture = async () => {
 }
 
 const startScoreCapture = () => {
-  if (!isMaster || PikaraokeConfig.disableScore || !scoreMediaStream) return;
+  if (!isMaster || BiaokeConfig.disableScore || !scoreMediaStream) return;
   if (scoreRecorder && scoreRecorder.state === "recording") return;
 
   scoreChunks = [];
@@ -174,7 +174,7 @@ const uploadScoreRecording = async (blob) => {
     formData.append("started_at", scoreRecordingMeta.startedAt);
   }
 
-  const response = await fetch(PikaraokeConfig.scoreAnalyzeUrl, {
+  const response = await fetch(BiaokeConfig.scoreAnalyzeUrl, {
     method: "POST",
     body: formData,
   });
@@ -212,8 +212,8 @@ const stopScoreCapture = async (analyze = false) => {
 }
 
 const endSong = async (reason = null, showScore = false) => {
-  const realScore = await stopScoreCapture(showScore && !PikaraokeConfig.disableScore);
-  if (showScore && !PikaraokeConfig.disableScore) {
+  const realScore = await stopScoreCapture(showScore && !BiaokeConfig.disableScore);
+  if (showScore && !BiaokeConfig.disableScore) {
     isScoreShown = true;
     await startScore("/static/", realScore);
     isScoreShown = false;
@@ -254,7 +254,7 @@ const getNextBgMusicSong = () => {
 const playBGMusic = async (play) => {
   const audio = getBackgroundMusicPlayer();
   if (play) {
-    if (PikaraokeConfig.disableBgMusic) return;
+    if (BiaokeConfig.disableBgMusic) return;
     if (!autoplayConfirmed) return;
     if (bg_playlist.length === 0) return;
 
@@ -264,7 +264,7 @@ const playBGMusic = async (play) => {
     audio.volume = 0;
     if (audio.readyState <= 2) await audio.load();
     await audio.play().catch(e => console.log("Autoplay blocked (music)"));
-    $(audio).animate({ volume: PikaraokeConfig.bgMusicVolume }, 2000);
+    $(audio).animate({ volume: BiaokeConfig.bgMusicVolume }, 2000);
   } else {
     if (audio) {
       $(audio).animate({ volume: 0 }, 2000, () => audio.pause());
@@ -277,7 +277,7 @@ const playBGVideo = async (play) => {
   const bgVideoContainer = $('#bg-video-container');
 
   if (play) {
-    if (PikaraokeConfig.disableBgVideo) return;
+    if (BiaokeConfig.disableBgVideo) return;
     if (!autoplayConfirmed) return;
 
     if (isMediaPlaying(bgVideo)) return;
@@ -487,7 +487,7 @@ async function loadNowPlaying() {
 }
 
 const setupOverlayMenus = () => {
-  if (PikaraokeConfig.hideOverlay) {
+  if (BiaokeConfig.hideOverlay) {
     $('#bottom-container').hide();
     $('#top-container').hide();
   }
@@ -497,7 +497,7 @@ const setupOverlayMenus = () => {
     document.body.style.cursor = 'none';
     cursorVisible = false;
     $("#menu a").fadeOut();
-    if (PikaraokeConfig.showSplashClock) {
+    if (BiaokeConfig.showSplashClock) {
       setTimeout(() => {
         if (!cursorVisible) $("#clock").fadeIn();
       }, 1000);
@@ -594,7 +594,7 @@ const handleUnsupportedBrowser = () => {
     let warningMessage = document.createElement("p");
     warningMessage.classList.add("notification", "is-warning");
     warningMessage.innerHTML =
-      PikaraokeConfig.translations.unsupportedBrowser;
+      BiaokeConfig.translations.unsupportedBrowser;
     modalContents.prepend(warningMessage);
   }
 }
@@ -616,31 +616,31 @@ const stopClock = () => {
 }
 
 const toggleBGMedia = (configKey, playFn, disabled) => {
-  PikaraokeConfig[configKey] = disabled;
+  BiaokeConfig[configKey] = disabled;
   disabled ? playFn(false) : shouldBackgroundMediaPlay() && playFn(true);
 };
 
 const PREFERENCE_EFFECTS = {
   disable_bg_video:    (v) => toggleBGMedia("disableBgVideo", playBGVideo, v),
   disable_bg_music:    (v) => toggleBGMedia("disableBgMusic", playBGMusic, v),
-  disable_score:       (v) => { PikaraokeConfig.disableScore = v; },
+  disable_score:       (v) => { BiaokeConfig.disableScore = v; },
   show_splash_clock:   (v) => {
-    PikaraokeConfig.showSplashClock = v;
+    BiaokeConfig.showSplashClock = v;
     v ? startClock() : (stopClock(), $("#clock").hide());
   },
   hide_overlay:        (v) => {
-    PikaraokeConfig.hideOverlay = v;
+    BiaokeConfig.hideOverlay = v;
     $("#bottom-container, #top-container").toggle(!v);
   },
   hide_url:            (v) => { $("#qr-code, #screensaver-qr").toggle(!v); },
   bg_music_volume:     (v) => {
-    PikaraokeConfig.bgMusicVolume = v;
+    BiaokeConfig.bgMusicVolume = v;
     const player = getBackgroundMusicPlayer();
     if (isMediaPlaying(player)) $(player).animate({ volume: v }, 1000);
   },
   screensaver_timeout: (v) => {
     screensaverTimeoutSeconds = v;
-    PikaraokeConfig.screensaverTimeout = v;
+    BiaokeConfig.screensaverTimeout = v;
   },
 };
 
@@ -672,11 +672,11 @@ const setupSocketEvents = () => {
   });
   socket.on('connect_error', (error) => {
     console.error('Connection error:', error);
-    flashNotification(PikaraokeConfig.translations.socketConnectionLost, "is-danger");
+    flashNotification(BiaokeConfig.translations.socketConnectionLost, "is-danger");
   });
   socket.on('disconnect', (reason) => {
     console.warn('Socket disconnected:', reason);
-    flashNotification(PikaraokeConfig.translations.socketConnectionLost, "is-danger");
+    flashNotification(BiaokeConfig.translations.socketConnectionLost, "is-danger");
   });
   socket.on('pause', () => {
     const video = getVideoPlayer();
@@ -775,7 +775,7 @@ const setupUIScaling = () => {
   uiScale = parseFloat(rawScale) || 1;
 
   const scaleTargets = [
-    { selector: '#logo-container img.logo', origin: null },
+    { selector: '#logo-container .biaoke-brand', origin: null },
     { selector: '#top-container', origin: 'top right' },
     { selector: '#ap-container', origin: 'top left' },
     { selector: '#qr-code', origin: 'bottom left' },
@@ -802,7 +802,7 @@ const setupUIScaling = () => {
 $(function () {
   // Setup various features and listeners
   setupUIScaling();
-  if (PikaraokeConfig.showSplashClock) startClock();
+  if (BiaokeConfig.showSplashClock) startClock();
   setupScreensaver();
   setupOverlayMenus();
   setupVideoPlayer();

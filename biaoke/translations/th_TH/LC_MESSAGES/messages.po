@@ -196,13 +196,13 @@ msgid "You don't have permission to update yt-dlp"
 msgstr "คุณไม่ได้รับอนุญาตให้อัปเดต yt-dlp"
 
 # auto-translated
-#. Message shown after quitting pikaraoke.
+#. Message shown after quitting biaoke.
 #: routes/admin.py:97
-msgid "Exiting pikaraoke now!"
+msgid "Exiting biaoke now!"
 msgstr "ออกจากพิคาราโอเกะแล้ว!"
 
 # auto-translated
-#. Message shown after trying to quit pikaraoke without admin permissions.
+#. Message shown after trying to quit biaoke without admin permissions.
 #: routes/admin.py:104
 msgid "You don't have permission to quit"
 msgstr "คุณไม่ได้รับอนุญาตให้ออก"
@@ -853,7 +853,7 @@ msgstr "คุณแน่ใจหรือว่าต้องการเล
 
 # auto-translated
 #. Confirmation text whe the user starts to turn off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:75
 msgid "Are you sure you want to shut down?"
 msgstr "คุณแน่ใจหรือไม่ว่าต้องการปิดระบบ?"
@@ -866,7 +866,7 @@ msgstr "คุณแน่ใจหรือไม่ว่าต้องกา
 
 # auto-translated
 #. Confirmation text whe the user starts to reboot the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:91
 msgid "Are you sure you want to reboot?"
 msgstr "คุณแน่ใจหรือไม่ว่าต้องการรีบูต?"
@@ -1184,7 +1184,7 @@ msgid "System Data"
 msgstr "ข้อมูลระบบ"
 
 # auto-translated
-#. Header of the information section about the computer running Pikaraoke.
+#. Header of the information section about the computer running Biaoke.
 #: templates/info.html:483
 msgid "System Info"
 msgstr "ข้อมูลระบบ"
@@ -1214,9 +1214,9 @@ msgid "FFmpeg version:"
 msgstr "เวอร์ชัน FFmpeg:"
 
 # auto-translated
-#. The version of Pikaraoke running right now.
+#. The version of Biaoke running right now.
 #: templates/info.html:497
-msgid "Pikaraoke version:"
+msgid "Biaoke version:"
 msgstr "เวอร์ชั่นปิคาราโอเกะ:"
 
 # auto-translated
@@ -1226,7 +1226,7 @@ msgid "System stats"
 msgstr "สถิติของระบบ"
 
 # auto-translated
-#. The CPU usage of the computer running Pikaraoke.
+#. The CPU usage of the computer running Biaoke.
 #: templates/info.html:509
 msgid "CPU:"
 msgstr "ซีพียู:"
@@ -1237,13 +1237,13 @@ msgid "Loading..."
 msgstr "กำลังโหลด..."
 
 # auto-translated
-#. The disk usage of the computer running Pikaraoke. Used by downloaded songs.
+#. The disk usage of the computer running Biaoke. Used by downloaded songs.
 #: templates/info.html:511
 msgid "Disk Usage:"
 msgstr "การใช้ดิสก์:"
 
 # auto-translated
-#. The memory (RAM) usage of the computer running Pikaraoke.
+#. The memory (RAM) usage of the computer running Biaoke.
 #: templates/info.html:513
 msgid "Memory:"
 msgstr "หน่วยความจำ:"
@@ -1276,22 +1276,22 @@ msgstr ""
 
 # auto-translated
 #. Text for the link which will try and update yt-dlp on the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:536
 msgid "Update yt-dlp"
 msgstr "อัพเดต yt-dlp"
 
 # auto-translated
 #. Help text which explains why updating yt-dlp can fail. The log is a file on
-#. the machine running Pikaraoke.
+#. the machine running Biaoke.
 #: templates/info.html:540
 msgid ""
 "* This update link above may fail if you don't have proper file "
 "permissions.\n"
-"\t\t\t\t\t\t\tCheck the pikaraoke log for errors."
+"\t\t\t\t\t\t\tCheck the biaoke log for errors."
 msgstr ""
 "* ลิงก์อัปเดตด้านบนนี้อาจล้มเหลวหากคุณไม่มีสิทธิ์อนุญาตไฟล์ที่เหมาะสม\n"
-"\t\t\t\t\t\t\tตรวจสอบบันทึก pikaraoke เพื่อดูข้อผิดพลาด"
+"\t\t\t\t\t\t\tตรวจสอบบันทึก biaoke เพื่อดูข้อผิดพลาด"
 
 # auto-translated
 #. Title of the updates section.
@@ -1311,13 +1311,13 @@ msgstr "ขยายระบบไฟล์ Raspberry Pi"
 #. filesystem.
 #: templates/info.html:562
 msgid ""
-"If you just installed the pre-built pikaraoke pi image and your SD card "
+"If you just installed the pre-built biaoke pi image and your SD card "
 "is larger than 4GB,\n"
 "\t\t\t\t\t\t\tyou may want to expand the filesystem to utilize the "
 "remaining space. You only need to do this once.\n"
 "\t\t\t\t\t\t\tThis will reboot the system."
 msgstr ""
-"หากคุณเพิ่งติดตั้งอิมเมจ pikaraoke pi ที่สร้างไว้ล่วงหน้าและการ์ด SD "
+"หากคุณเพิ่งติดตั้งอิมเมจ biaoke pi ที่สร้างไว้ล่วงหน้าและการ์ด SD "
 "ของคุณมีขนาดใหญ่กว่า 4GB\n"
 "\t\t\t\t\t\t\tคุณอาจต้องการขยายระบบไฟล์เพื่อใช้พื้นที่ที่เหลืออยู่ "
 "คุณต้องทำสิ่งนี้เพียงครั้งเดียว\n"
@@ -1337,7 +1337,7 @@ msgstr "ออกจากระบบ"
 
 # auto-translated
 #. Title of the section on shutting down / turning off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:593
 msgid "Shutdown"
 msgstr "ปิดเครื่อง"
@@ -1353,20 +1353,20 @@ msgstr ""
 "ปิดเซิร์ฟเวอร์ของคุณอย่างเหมาะสมเสมอเพื่อหลีกเลี่ยงความเสียหายของข้อมูล"
 
 # auto-translated
-#. Text for button which turns off Pikaraoke for everyone using it at your
+#. Text for button which turns off Biaoke for everyone using it at your
 #. house.
 #: templates/info.html:607
-msgid "Quit Pikaraoke"
+msgid "Quit Biaoke"
 msgstr "เลิกปิ๊กคาราโอเกะ"
 
 # auto-translated
-#. Text for button which reboots the machine running Pikaraoke.
+#. Text for button which reboots the machine running Biaoke.
 #: templates/info.html:610
 msgid "Reboot System"
 msgstr "รีบูตระบบ"
 
 # auto-translated
-#. Text for button which turn soff the machine running Pikaraoke.
+#. Text for button which turn soff the machine running Biaoke.
 #: templates/info.html:613
 msgid "Shutdown System"
 msgstr "ระบบปิดเครื่อง"
@@ -1628,7 +1628,7 @@ msgstr "คะแนนของคุณ"
 #: templates/splash.html:132
 msgid ""
 "Due to limitations with browser permissions, you must interact\n"
-"      with the page once before it allows autoplay of videos. Pikaraoke "
+"      with the page once before it allows autoplay of videos. Biaoke "
 "will not\n"
 "      play otherwise. Click the button below to\n"
 "      <a onClick=\"handleConfirmation()\">confirm</a>."

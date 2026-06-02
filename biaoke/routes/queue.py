@@ -10,7 +10,7 @@ from flask import flash, redirect, render_template, request, url_for
 from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
-from pikaraoke.lib.current_app import (
+from biaoke.lib.current_app import (
     broadcast_event,
     get_karaoke_instance,
     get_site_name,

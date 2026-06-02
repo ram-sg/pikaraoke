@@ -171,12 +171,12 @@ msgstr "正在更新 yt-dlp！可能需要一兩分鐘..."
 msgid "You don't have permission to update yt-dlp"
 msgstr "您沒有權限更新 yt-dlp"
 
-#. Message shown after quitting pikaraoke.
+#. Message shown after quitting biaoke.
 #: routes/admin.py:97
-msgid "Exiting pikaraoke now!"
+msgid "Exiting biaoke now!"
 msgstr "正在退出卡拉OK派！"
 
-#. Message shown after trying to quit pikaraoke without admin permissions.
+#. Message shown after trying to quit biaoke without admin permissions.
 #: routes/admin.py:104
 msgid "You don't have permission to quit"
 msgstr "您沒有權限退出"
@@ -739,7 +739,7 @@ msgid "Are you sure you want to quit?"
 msgstr "您確定要退出嗎？"
 
 #. Confirmation text whe the user starts to turn off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:75
 msgid "Are you sure you want to shut down?"
 msgstr "您確定要關機嗎？"
@@ -750,7 +750,7 @@ msgid "Are you sure you want to clear your preferences?"
 msgstr "您確定要清除您的偏好設定嗎？"
 
 #. Confirmation text whe the user starts to reboot the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:91
 msgid "Are you sure you want to reboot?"
 msgstr "您確定要重新啟動嗎？"
@@ -1027,7 +1027,7 @@ msgstr "清除偏好設定"
 msgid "System Data"
 msgstr "系統統計"
 
-#. Header of the information section about the computer running Pikaraoke.
+#. Header of the information section about the computer running Biaoke.
 #: templates/info.html:483
 msgid "System Info"
 msgstr "系統資訊"
@@ -1052,9 +1052,9 @@ msgstr "yt-dlp 版本："
 msgid "FFmpeg version:"
 msgstr "FFmpeg 版本："
 
-#. The version of Pikaraoke running right now.
+#. The version of Biaoke running right now.
 #: templates/info.html:497
-msgid "Pikaraoke version:"
+msgid "Biaoke version:"
 msgstr "卡拉OK派版本："
 
 #. Header of the information section about the System stats.
@@ -1063,7 +1063,7 @@ msgid "System stats"
 msgstr "系統統計"
 
 # auto-translated
-#. The CPU usage of the computer running Pikaraoke.
+#. The CPU usage of the computer running Biaoke.
 #: templates/info.html:509
 msgid "CPU:"
 msgstr "中央處理器："
@@ -1074,13 +1074,13 @@ msgid "Loading..."
 msgstr "載入中..."
 
 # auto-translated
-#. The disk usage of the computer running Pikaraoke. Used by downloaded songs.
+#. The disk usage of the computer running Biaoke. Used by downloaded songs.
 #: templates/info.html:511
 msgid "Disk Usage:"
 msgstr "磁碟使用情況："
 
 # auto-translated
-#. The memory (RAM) usage of the computer running Pikaraoke.
+#. The memory (RAM) usage of the computer running Biaoke.
 #: templates/info.html:513
 msgid "Memory:"
 msgstr "記憶："
@@ -1110,18 +1110,18 @@ msgstr ""
 "   當前安裝的版本是：\"%(youtubedl_version)s\""
 
 #. Text for the link which will try and update yt-dlp on the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:536
 msgid "Update yt-dlp"
 msgstr "更新 yt-dlp"
 
 #. Help text which explains why updating yt-dlp can fail. The log is a file on
-#. the machine running Pikaraoke.
+#. the machine running Biaoke.
 #: templates/info.html:540
 msgid ""
 "* This update link above may fail if you don't have proper file "
 "permissions.\n"
-"\t\t\t\t\t\t\tCheck the pikaraoke log for errors."
+"\t\t\t\t\t\t\tCheck the biaoke log for errors."
 msgstr ""
 "如果您沒有適當的檔案權限，上面的更新連結可能會失敗。\n"
 "    檢查卡拉OK派日誌以查看錯誤。"
@@ -1141,7 +1141,7 @@ msgstr "擴展樹莓派檔案系統"
 #. filesystem.
 #: templates/info.html:562
 msgid ""
-"If you just installed the pre-built pikaraoke pi image and your SD card "
+"If you just installed the pre-built biaoke pi image and your SD card "
 "is larger than 4GB,\n"
 "\t\t\t\t\t\t\tyou may want to expand the filesystem to utilize the "
 "remaining space. You only need to do this once.\n"
@@ -1164,7 +1164,7 @@ msgid "Log out"
 msgstr "退出"
 
 #. Title of the section on shutting down / turning off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:593
 msgid "Shutdown"
 msgstr "關機"
@@ -1176,18 +1176,18 @@ msgid ""
 "data corruption."
 msgstr "不要直接拔掉電源！始終正確關閉您的伺服器，以避免資料損壞。"
 
-#. Text for button which turns off Pikaraoke for everyone using it at your
+#. Text for button which turns off Biaoke for everyone using it at your
 #. house.
 #: templates/info.html:607
-msgid "Quit Pikaraoke"
+msgid "Quit Biaoke"
 msgstr "退出卡拉OK派"
 
-#. Text for button which reboots the machine running Pikaraoke.
+#. Text for button which reboots the machine running Biaoke.
 #: templates/info.html:610
 msgid "Reboot System"
 msgstr "重新啟動系統"
 
-#. Text for button which turn soff the machine running Pikaraoke.
+#. Text for button which turn soff the machine running Biaoke.
 #: templates/info.html:613
 msgid "Shutdown System"
 msgstr "關閉系統"
@@ -1430,7 +1430,7 @@ msgstr "您的分數"
 #: templates/splash.html:132
 msgid ""
 "Due to limitations with browser permissions, you must interact\n"
-"      with the page once before it allows autoplay of videos. Pikaraoke "
+"      with the page once before it allows autoplay of videos. Biaoke "
 "will not\n"
 "      play otherwise. Click the button below to\n"
 "      <a onClick=\"handleConfirmation()\">confirm</a>."

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from flask import Flask
 
-from pikaraoke.routes.score import score_bp
+from biaoke.routes.score import score_bp
 
 
 def test_score_analyze_requires_audio():
@@ -23,7 +23,7 @@ def test_score_analyze_returns_local_result():
     app.register_blueprint(score_bp)
     fake_result = {"score": 77, "tier": "high", "review": "ok", "engine": "test", "metrics": {}}
 
-    with patch("pikaraoke.routes.score.analyze_upload_bytes", return_value=fake_result):
+    with patch("biaoke.routes.score.analyze_upload_bytes", return_value=fake_result):
         response = app.test_client().post(
             "/score/analyze",
             data={"audio": (BytesIO(b"audio"), "recording.webm")},

@@ -6,16 +6,16 @@ import pytest
 from flask import Flask
 from flask_babel import Babel
 
-from pikaraoke.routes.site_auth import require_site_auth, site_auth_bp
+from biaoke.routes.site_auth import require_site_auth, site_auth_bp
 
 
 @pytest.fixture
 def app():
-    template_dir = Path(__file__).parents[2] / "pikaraoke" / "templates"
+    template_dir = Path(__file__).parents[2] / "biaoke" / "templates"
     test_app = Flask(__name__, template_folder=str(template_dir))
     test_app.secret_key = "test"
     test_app.jinja_env.add_extension("jinja2.ext.i18n")
-    test_app.config["SITE_NAME"] = "PiKaraoke"
+    test_app.config["SITE_NAME"] = "Biaoke"
     test_app.config["SITE_AUTH_LOGIN"] = None
     test_app.config["SITE_AUTH_PASSWORD"] = None
     Babel(test_app)

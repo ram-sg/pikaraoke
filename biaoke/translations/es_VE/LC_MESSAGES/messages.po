@@ -172,12 +172,12 @@ msgstr "Actualizando yt-dlp! Deberia de tomar un minuto o dos... "
 msgid "You don't have permission to update yt-dlp"
 msgstr "No tienes el permiso para actualizar yt-dlp"
 
-#. Message shown after quitting pikaraoke.
+#. Message shown after quitting biaoke.
 #: routes/admin.py:97
-msgid "Exiting pikaraoke now!"
-msgstr "Salir del pikaraoke ya!"
+msgid "Exiting biaoke now!"
+msgstr "Salir del biaoke ya!"
 
-#. Message shown after trying to quit pikaraoke without admin permissions.
+#. Message shown after trying to quit biaoke without admin permissions.
 #: routes/admin.py:104
 msgid "You don't have permission to quit"
 msgstr "No tienes permisos para salir"
@@ -754,7 +754,7 @@ msgid "Are you sure you want to quit?"
 msgstr "¿Seguro que quieres salir?"
 
 #. Confirmation text whe the user starts to turn off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:75
 msgid "Are you sure you want to shut down?"
 msgstr "¿Estás seguro(a) de que quieres cerrar?"
@@ -765,7 +765,7 @@ msgid "Are you sure you want to clear your preferences?"
 msgstr "¿Está seguro de que desea borrar sus preferencias?"
 
 #. Confirmation text whe the user starts to reboot the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:91
 msgid "Are you sure you want to reboot?"
 msgstr "¿Estás seguro(a) de que quieres reiniciar?"
@@ -1061,7 +1061,7 @@ msgstr "Borrar preferencias"
 msgid "System Data"
 msgstr "Estadísticas del sistema"
 
-#. Header of the information section about the computer running Pikaraoke.
+#. Header of the information section about the computer running Biaoke.
 #: templates/info.html:483
 msgid "System Info"
 msgstr "Información del sistema"
@@ -1086,10 +1086,10 @@ msgstr "yt-dlp versión:"
 msgid "FFmpeg version:"
 msgstr "FFmpeg versión:"
 
-#. The version of Pikaraoke running right now.
+#. The version of Biaoke running right now.
 #: templates/info.html:497
-msgid "Pikaraoke version:"
-msgstr "Pikaraoke versión:"
+msgid "Biaoke version:"
+msgstr "Biaoke versión:"
 
 #. Header of the information section about the System stats.
 #: templates/info.html:503
@@ -1097,7 +1097,7 @@ msgid "System stats"
 msgstr "Estadísticas del sistema"
 
 # auto-translated
-#. The CPU usage of the computer running Pikaraoke.
+#. The CPU usage of the computer running Biaoke.
 #: templates/info.html:509
 msgid "CPU:"
 msgstr "UPC:"
@@ -1108,13 +1108,13 @@ msgid "Loading..."
 msgstr "Cargando..."
 
 # auto-translated
-#. The disk usage of the computer running Pikaraoke. Used by downloaded songs.
+#. The disk usage of the computer running Biaoke. Used by downloaded songs.
 #: templates/info.html:511
 msgid "Disk Usage:"
 msgstr "Uso del disco:"
 
 # auto-translated
-#. The memory (RAM) usage of the computer running Pikaraoke.
+#. The memory (RAM) usage of the computer running Biaoke.
 #: templates/info.html:513
 msgid "Memory:"
 msgstr "Memoria:"
@@ -1145,22 +1145,22 @@ msgstr ""
 "   La versión instalada actualmente es: \"%(youtubedl_version)s\""
 
 #. Text for the link which will try and update yt-dlp on the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:536
 msgid "Update yt-dlp"
 msgstr "Actualizar yt-dlp"
 
 #. Help text which explains why updating yt-dlp can fail. The log is a file on
-#. the machine running Pikaraoke.
+#. the machine running Biaoke.
 #: templates/info.html:540
 msgid ""
 "* This update link above may fail if you don't have proper file "
 "permissions.\n"
-"\t\t\t\t\t\t\tCheck the pikaraoke log for errors."
+"\t\t\t\t\t\t\tCheck the biaoke log for errors."
 msgstr ""
 "Este enlace de actualización anterior puede fallar si no tiene los "
 "permisos de archivo adecuados.\n"
-"    Consulte el registro de pikaraoke en busca de errores."
+"    Consulte el registro de biaoke en busca de errores."
 
 #. Title of the updates section.
 #: templates/info.html:552
@@ -1177,13 +1177,13 @@ msgstr "Expandir el sistema de archivos Raspberry Pi"
 #. filesystem.
 #: templates/info.html:562
 msgid ""
-"If you just installed the pre-built pikaraoke pi image and your SD card "
+"If you just installed the pre-built biaoke pi image and your SD card "
 "is larger than 4GB,\n"
 "\t\t\t\t\t\t\tyou may want to expand the filesystem to utilize the "
 "remaining space. You only need to do this once.\n"
 "\t\t\t\t\t\t\tThis will reboot the system."
 msgstr ""
-"Si acaba de instalar la imagen pikaraoke prediseñada y su tarjeta SD "
+"Si acaba de instalar la imagen biaoke prediseñada y su tarjeta SD "
 "tiene más de 4 GB,\n"
 "    es posible que desee ampliar el sistema de archivos para utilizar el "
 "espacio restante. Sólo necesitas hacer esto una vez.\n"
@@ -1202,7 +1202,7 @@ msgid "Log out"
 msgstr "Finalizar la sesión"
 
 #. Title of the section on shutting down / turning off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:593
 msgid "Shutdown"
 msgstr "Apagar"
@@ -1216,18 +1216,18 @@ msgstr ""
 "¡No simplemente desconectes el enchufe! Apague siempre su servidor "
 "correctamente para evitar la corrupción de datos."
 
-#. Text for button which turns off Pikaraoke for everyone using it at your
+#. Text for button which turns off Biaoke for everyone using it at your
 #. house.
 #: templates/info.html:607
-msgid "Quit Pikaraoke"
-msgstr "Salir del pikaraoke"
+msgid "Quit Biaoke"
+msgstr "Salir del biaoke"
 
-#. Text for button which reboots the machine running Pikaraoke.
+#. Text for button which reboots the machine running Biaoke.
 #: templates/info.html:610
 msgid "Reboot System"
 msgstr "Reiniciar el sistema"
 
-#. Text for button which turn soff the machine running Pikaraoke.
+#. Text for button which turn soff the machine running Biaoke.
 #: templates/info.html:613
 msgid "Shutdown System"
 msgstr "Sistema de apagado"
@@ -1475,14 +1475,14 @@ msgstr "Tu puntuación"
 #: templates/splash.html:132
 msgid ""
 "Due to limitations with browser permissions, you must interact\n"
-"      with the page once before it allows autoplay of videos. Pikaraoke "
+"      with the page once before it allows autoplay of videos. Biaoke "
 "will not\n"
 "      play otherwise. Click the button below to\n"
 "      <a onClick=\"handleConfirmation()\">confirm</a>."
 msgstr ""
 "Debido a limitaciones con los permisos del navegador, debes interactuar\n"
 "      con la página una vez para que se active la reproducción automática"
-" de videos. De lo contrario, Pikaraoke\n"
+" de videos. De lo contrario, Biaoke\n"
 "      no reproducirá. Haz clic en el botón de abajo para\n"
 "      <a onClick=\"handleConfirmation()\">confirmar</a> ."
 

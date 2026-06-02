@@ -4,7 +4,7 @@ import os
 import sqlite3
 import threading
 
-from pikaraoke.lib.get_platform import get_data_directory
+from biaoke.lib.get_platform import get_data_directory
 
 _SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -47,7 +47,7 @@ class KaraokeDatabase:
 
     def __init__(self, db_path: str | None = None) -> None:
         if db_path is None:
-            db_path = os.path.join(get_data_directory(), "pikaraoke.db")
+            db_path = os.path.join(get_data_directory(), "biaoke.db")
         self._db_path = db_path
         # All operations (including reads) share a single connection, so the
         # lock is required for thread safety -- Python's sqlite3.Connection is

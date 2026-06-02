@@ -1,4 +1,4 @@
-"""Automated translation workflow for PiKaraoke.
+"""Automated translation workflow for Biaoke.
 
 Extracts, updates, auto-translates, and compiles .po translation files.
 Uses Google Translate (via deep-translator) for untranslated/fuzzy entries.
@@ -20,14 +20,14 @@ from pathlib import Path
 import polib
 from deep_translator import GoogleTranslator
 
-from pikaraoke.constants import LANGUAGES
+from biaoke.constants import LANGUAGES
 
 # Project paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PIKARAOKE_DIR = PROJECT_ROOT / "pikaraoke"
-TRANSLATIONS_DIR = PIKARAOKE_DIR / "translations"
-POT_FILE = PIKARAOKE_DIR / "messages.pot"
-BABEL_CFG = PIKARAOKE_DIR / "babel.cfg"
+BIAOKE_DIR = PROJECT_ROOT / "biaoke"
+TRANSLATIONS_DIR = BIAOKE_DIR / "translations"
+POT_FILE = BIAOKE_DIR / "messages.pot"
+BABEL_CFG = BIAOKE_DIR / "babel.cfg"
 
 # Map locale codes (from constants.py) to Google Translate language codes
 LOCALE_TO_GOOGLE = {
@@ -63,7 +63,7 @@ def run_pybabel(args: list[str]) -> None:
     """Run a pybabel command, raising on failure."""
     cmd = [sys.executable, "-m", "babel.messages.frontend"] + args
     print(f"  Running: pybabel {' '.join(args)}")
-    result = subprocess.run(cmd, cwd=str(PIKARAOKE_DIR), capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(BIAOKE_DIR), capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  STDERR: {result.stderr}")
         raise RuntimeError(f"pybabel {args[0]} failed (exit {result.returncode})")
@@ -252,7 +252,7 @@ def compile_translations() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Automated translation workflow for PiKaraoke")
+    parser = argparse.ArgumentParser(description="Automated translation workflow for Biaoke")
     parser.add_argument(
         "--extract-po-only",
         action="store_true",

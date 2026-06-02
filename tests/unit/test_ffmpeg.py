@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pikaraoke.lib.ffmpeg import (
+from biaoke.lib.ffmpeg import (
     get_ffmpeg_version,
     get_media_duration,
     is_ffmpeg_installed,
@@ -123,28 +123,28 @@ class TestGetMediaDuration:
 
     def test_returns_duration_rounded(self):
         """Test that duration is returned as rounded integer."""
-        with patch("pikaraoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
+        with patch("biaoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
             mock_probe.return_value = {"format": {"duration": "183.456"}}
             result = get_media_duration("/path/to/video.mp4")
             assert result == 183
 
     def test_returns_none_on_probe_error(self):
         """Test that None is returned when probe fails."""
-        with patch("pikaraoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
+        with patch("biaoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
             mock_probe.side_effect = Exception("Probe failed")
             result = get_media_duration("/path/to/invalid.mp4")
             assert result is None
 
     def test_returns_none_on_missing_duration(self):
         """Test that None is returned when duration key is missing."""
-        with patch("pikaraoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
+        with patch("biaoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
             mock_probe.return_value = {"format": {}}
             result = get_media_duration("/path/to/video.mp4")
             assert result is None
 
     def test_handles_integer_duration(self):
         """Test handling of integer duration value."""
-        with patch("pikaraoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
+        with patch("biaoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
             mock_probe.return_value = {"format": {"duration": "120"}}
             result = get_media_duration("/path/to/video.mp4")
             assert result == 120

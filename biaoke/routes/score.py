@@ -9,11 +9,11 @@ from pathlib import Path
 import requests
 from flask import Blueprint, jsonify, request
 
-from pikaraoke.lib.scoring import ScoreAnalysisError, analyze_upload_bytes, get_scoring_engine_status
+from biaoke.lib.scoring import ScoreAnalysisError, analyze_upload_bytes, get_scoring_engine_status
 
 score_bp = Blueprint("score", __name__)
 
-SCORING_SERVICE_ENV = "PIKARAOKE_SCORING_SERVICE_URL"
+SCORING_SERVICE_ENV = "BIAOKE_SCORING_SERVICE_URL"
 
 
 @score_bp.route("/score/status")

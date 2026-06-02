@@ -5,7 +5,7 @@ Param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "--- PiKaraoke Windows Installer ---" -ForegroundColor Cyan
+Write-Host "--- Biaoke Windows Installer ---" -ForegroundColor Cyan
 
 # 1. Check for Winget
 if (!(Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -14,7 +14,7 @@ if (!(Get-Command winget -ErrorAction SilentlyContinue)) {
 }
 
 # Determine packages to install
-$installList = @("pikaraoke (via uv)")
+$installList = @("biaoke (via uv)")
 $skipDeno = $false
 if (Get-Command node -ErrorAction SilentlyContinue) {
     Write-Host "Node.js detected. Skipping Deno installation."
@@ -81,46 +81,46 @@ Write-Host "Checking for existing uv installations..." -ForegroundColor Yellow
 $uvPackages = ""
 $uvPackages = uv tool list | Out-String
 
-# 6. install pikaraoke with uv
-if ($uvPackages -match "pikaraoke") {
-    Write-Host "Upgrading pikaraoke via uv..." -ForegroundColor Yellow
+# 6. install biaoke with uv
+if ($uvPackages -match "biaoke") {
+    Write-Host "Upgrading biaoke via uv..." -ForegroundColor Yellow
     if ($Local) {
         uv tool install --force .
     } else {
-        uv tool upgrade pikaraoke
+        uv tool upgrade biaoke
     }
 } else {
-    Write-Host "Installing pikaraoke via uv..." -ForegroundColor Yellow
+    Write-Host "Installing biaoke via uv..." -ForegroundColor Yellow
     if ($Local) {
         uv tool install .
     } else {
-        uv tool install pikaraoke
+        uv tool install biaoke
     }
 }
-if ($LASTEXITCODE -ne 0) { throw "Failed to install/upgrade pikaraoke via uv tool" }
+if ($LASTEXITCODE -ne 0) { throw "Failed to install/upgrade biaoke via uv tool" }
 
 # 7. Create Desktop Shortcut
 Write-Host "Creating Desktop Shortcuts..." -ForegroundColor Yellow
 try {
     $desktopPath = [System.Environment]::GetFolderPath("Desktop")
     if ([string]::IsNullOrWhiteSpace($desktopPath)) { throw "Could not resolve Desktop path" }
-    # Robust path resolution for pikaraoke.exe
-    $pikaraokeExe = ""
+    # Robust path resolution for biaoke.exe
+    $biaokeExe = ""
     $exePaths = @(
-        (Get-Command pikaraoke -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
-        (Join-Path $env:LOCALAPPDATA "uv\bin\pikaraoke.exe"),
-        (Join-Path $HOME ".local\bin\pikaraoke.exe") # uv also uses this on some setups
+        (Get-Command biaoke -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+        (Join-Path $env:LOCALAPPDATA "uv\bin\biaoke.exe"),
+        (Join-Path $HOME ".local\bin\biaoke.exe") # uv also uses this on some setups
     )
-    foreach ($p in $exePaths) { if ($p -and (Test-Path $p)) { $pikaraokeExe = $p; break } }
+    foreach ($p in $exePaths) { if ($p -and (Test-Path $p)) { $biaokeExe = $p; break } }
 
-    if ($pikaraokeExe) {
+    if ($biaokeExe) {
         $WScriptShell = New-Object -ComObject WScript.Shell
 
         # Download Icon from GitHub once if needed
-        $iconPath = Join-Path ([System.IO.Path]::GetDirectoryName($pikaraokeExe)) "logo.ico"
+        $iconPath = Join-Path ([System.IO.Path]::GetDirectoryName($biaokeExe)) "logo.ico"
         $iconFound = $false
         try {
-            $iconUrl = "https://raw.githubusercontent.com/vicwomg/pikaraoke/refs/heads/master/pikaraoke/static/icons/logo.ico"
+            $iconUrl = "https://raw.githubusercontent.com/vicwomg/biaoke/refs/heads/master/biaoke/static/icons/logo.ico"
             if (!(Test-Path $iconPath)) {
                 Invoke-WebRequest -Uri $iconUrl -OutFile $iconPath -ErrorAction Stop
             }
@@ -131,17 +131,17 @@ try {
 
         # Create multiple shortcuts
         $shortcutConfigs = @(
-            @{ Name = "PiKaraoke"; Args = "" },
-            @{ Name = "PiKaraoke (headless)"; Args = "--headless" }
+            @{ Name = "Biaoke"; Args = "" },
+            @{ Name = "Biaoke (headless)"; Args = "--headless" }
         )
 
         foreach ($config in $shortcutConfigs) {
             $sName = $config.Name
             $shortcutPath = Join-Path $desktopPath "$sName.lnk"
             $shortcut = $WScriptShell.CreateShortcut($shortcutPath)
-            $shortcut.TargetPath = $pikaraokeExe
+            $shortcut.TargetPath = $biaokeExe
             $shortcut.Arguments = $config.Args
-            $shortcut.WorkingDirectory = [System.IO.Path]::GetDirectoryName($pikaraokeExe)
+            $shortcut.WorkingDirectory = [System.IO.Path]::GetDirectoryName($biaokeExe)
             if ($iconFound) {
                 $shortcut.IconLocation = "$iconPath,0"
             }
@@ -149,7 +149,7 @@ try {
             Write-Host "Created shortcut: $sName" -ForegroundColor Green
         }
     } else {
-        Write-Host "Could not find pikaraoke.exe to create shortcuts." -ForegroundColor Red
+        Write-Host "Could not find biaoke.exe to create shortcuts." -ForegroundColor Red
     }
 } catch {
     Write-Host "Failed to create desktop shortcuts: $($_.Exception.Message)" -ForegroundColor Red
@@ -158,6 +158,6 @@ try {
 Write-Host "`n--------------------------------------------------------" -ForegroundColor Green
 Write-Host "Installation complete!" -ForegroundColor Green
 Write-Host "Please restart your terminal (PowerShell) to ensure all PATH changes are loaded."
-Write-Host "Then, simply run: `pikaraoke` or launch PiKaraoke from the desktop shortcuts."
-Write-Host "`nTIP: Put your karaoke files in: $(Join-Path $HOME 'pikaraoke-songs')" -ForegroundColor Cyan
+Write-Host "Then, simply run: `biaoke` or launch Biaoke from the desktop shortcuts."
+Write-Host "`nTIP: Put your karaoke files in: $(Join-Path $HOME 'biaoke-songs')" -ForegroundColor Cyan
 Write-Host "--------------------------------------------------------"

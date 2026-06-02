@@ -1,4 +1,4 @@
-"""Efficient song list data structure for PiKaraoke."""
+"""Efficient song list data structure for Biaoke."""
 
 import logging
 import os

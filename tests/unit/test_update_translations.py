@@ -110,7 +110,7 @@ class TestRestorePlaceholders:
         ],
     )
     def test_roundtrip_real_strings(self, source):
-        """Verify that protect -> restore is lossless for real PiKaraoke strings."""
+        """Verify that protect -> restore is lossless for real Biaoke strings."""
         protected, tokens = _protect_placeholders(source)
         restored = _restore_placeholders(protected, tokens)
         assert restored == source

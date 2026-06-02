@@ -12,9 +12,9 @@ from flask import flash, jsonify, make_response, redirect, url_for
 from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
-from pikaraoke.karaoke import Karaoke
-from pikaraoke.lib.current_app import get_admin_password, get_karaoke_instance, is_admin
-from pikaraoke.lib.youtube_dl import get_youtubedl_version, upgrade_youtubedl
+from biaoke.karaoke import Karaoke
+from biaoke.lib.current_app import get_admin_password, get_karaoke_instance, is_admin
+from biaoke.lib.youtube_dl import get_youtubedl_version, upgrade_youtubedl
 
 _ = flask_babel.gettext
 
@@ -90,17 +90,17 @@ def sync_library():
 
 @admin_bp.route("/quit")
 def quit():
-    """Exit the PiKaraoke application."""
+    """Exit the Biaoke application."""
     k = get_karaoke_instance()
     if is_admin():
-        # MSG: Message shown after quitting pikaraoke.
-        msg = _("Exiting pikaraoke now!")
+        # MSG: Message shown after quitting biaoke.
+        msg = _("Exiting biaoke now!")
         flash(msg, "is-danger")
         k.send_notification(msg, "danger")
         th = threading.Thread(target=delayed_halt, args=[0, k])
         th.start()
     else:
-        # MSG: Message shown after trying to quit pikaraoke without admin permissions.
+        # MSG: Message shown after trying to quit biaoke without admin permissions.
         flash(_("You don't have permission to quit"), "is-danger")
     return redirect(url_for("home.home"))
 

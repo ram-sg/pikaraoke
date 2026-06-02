@@ -1,4 +1,4 @@
-"""Flask application context utilities for PiKaraoke."""
+"""Flask application context utilities for Biaoke."""
 
 import logging
 import os
@@ -10,7 +10,7 @@ from typing import Any
 from flask import current_app, request
 from flask_socketio import emit
 
-from pikaraoke.karaoke import Karaoke
+from biaoke.karaoke import Karaoke
 
 
 def is_admin() -> bool:

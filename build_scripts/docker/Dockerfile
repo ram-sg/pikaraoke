@@ -28,7 +28,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN uv pip install pip
 
 COPY docs ./docs
-COPY pikaraoke ./pikaraoke
+COPY biaoke ./biaoke
 
 # Final install of the package itself (fast)
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -37,21 +37,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Set up volumes and ports
 
 # Create a non-root user to run as
-RUN adduser -D -u 1000 pikaraoke
+RUN adduser -D -u 1000 biaoke
 
 # Directories must exist prior to run, otherwise the local volume persistence won't work
-RUN mkdir -p /home/pikaraoke/.pikaraoke && \
-    mkdir -p /app/pikaraoke-songs && \
-    chown -R pikaraoke:pikaraoke /app/pikaraoke-songs /home/pikaraoke /app/.venv
+RUN mkdir -p /home/biaoke/.biaoke && \
+    mkdir -p /app/biaoke-songs && \
+    chown -R biaoke:biaoke /app/biaoke-songs /home/biaoke /app/.venv
 
 # Set environment variables for the user
-ENV HOME=/home/pikaraoke
-USER pikaraoke
+ENV HOME=/home/biaoke
+USER biaoke
 
-VOLUME ["/app/pikaraoke-songs", "/home/pikaraoke/.pikaraoke"]
+VOLUME ["/app/biaoke-songs", "/home/biaoke/.biaoke"]
 EXPOSE 5555
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5555/ || exit 1
 
-ENTRYPOINT ["pikaraoke", "-d", "/app/pikaraoke-songs/", "--headless"]
+ENTRYPOINT ["biaoke", "-d", "/app/biaoke-songs/", "--headless"]

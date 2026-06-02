@@ -197,13 +197,13 @@ msgid "You don't have permission to update yt-dlp"
 msgstr "Je hebt geen toestemming om yt-dlp bij te werken"
 
 # auto-translated
-#. Message shown after quitting pikaraoke.
+#. Message shown after quitting biaoke.
 #: routes/admin.py:97
-msgid "Exiting pikaraoke now!"
-msgstr "Nu pikaraoke verlaten!"
+msgid "Exiting biaoke now!"
+msgstr "Nu biaoke verlaten!"
 
 # auto-translated
-#. Message shown after trying to quit pikaraoke without admin permissions.
+#. Message shown after trying to quit biaoke without admin permissions.
 #: routes/admin.py:104
 msgid "You don't have permission to quit"
 msgstr "U heeft geen toestemming om te stoppen"
@@ -862,7 +862,7 @@ msgstr "Weet je zeker dat je wilt stoppen?"
 
 # auto-translated
 #. Confirmation text whe the user starts to turn off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:75
 msgid "Are you sure you want to shut down?"
 msgstr "Weet u zeker dat u wilt afsluiten?"
@@ -875,7 +875,7 @@ msgstr "Weet u zeker dat u uw voorkeuren wilt wissen?"
 
 # auto-translated
 #. Confirmation text whe the user starts to reboot the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:91
 msgid "Are you sure you want to reboot?"
 msgstr "Weet je zeker dat je opnieuw wilt opstarten?"
@@ -1197,7 +1197,7 @@ msgid "System Data"
 msgstr "Systeemgegevens"
 
 # auto-translated
-#. Header of the information section about the computer running Pikaraoke.
+#. Header of the information section about the computer running Biaoke.
 #: templates/info.html:483
 msgid "System Info"
 msgstr "Systeeminfo"
@@ -1227,9 +1227,9 @@ msgid "FFmpeg version:"
 msgstr "FFmpeg-versie:"
 
 # auto-translated
-#. The version of Pikaraoke running right now.
+#. The version of Biaoke running right now.
 #: templates/info.html:497
-msgid "Pikaraoke version:"
+msgid "Biaoke version:"
 msgstr "Picaraoke-versie:"
 
 # auto-translated
@@ -1239,7 +1239,7 @@ msgid "System stats"
 msgstr "Systeemstatistieken"
 
 # auto-translated
-#. The CPU usage of the computer running Pikaraoke.
+#. The CPU usage of the computer running Biaoke.
 #: templates/info.html:509
 msgid "CPU:"
 msgstr "CPU:"
@@ -1250,13 +1250,13 @@ msgid "Loading..."
 msgstr "Laden..."
 
 # auto-translated
-#. The disk usage of the computer running Pikaraoke. Used by downloaded songs.
+#. The disk usage of the computer running Biaoke. Used by downloaded songs.
 #: templates/info.html:511
 msgid "Disk Usage:"
 msgstr "Schijfgebruik:"
 
 # auto-translated
-#. The memory (RAM) usage of the computer running Pikaraoke.
+#. The memory (RAM) usage of the computer running Biaoke.
 #: templates/info.html:513
 msgid "Memory:"
 msgstr "Geheugen:"
@@ -1288,21 +1288,21 @@ msgstr ""
 
 # auto-translated
 #. Text for the link which will try and update yt-dlp on the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:536
 msgid "Update yt-dlp"
 msgstr "Update yt-dlp"
 
 # auto-translated
 #. Help text which explains why updating yt-dlp can fail. The log is a file on
-#. the machine running Pikaraoke.
+#. the machine running Biaoke.
 #: templates/info.html:540
 msgid ""
 "* This update link above may fail if you don't have proper file permissions.\n"
-"\t\t\t\t\t\t\tCheck the pikaraoke log for errors."
+"\t\t\t\t\t\t\tCheck the biaoke log for errors."
 msgstr ""
 "*Deze updatelink hierboven mislukt mogelijk als u niet over de juiste bestandsrechten beschikt.\n"
-"\t\t\t\t\t\t\tControleer het pikaraoke-logboek op fouten."
+"\t\t\t\t\t\t\tControleer het biaoke-logboek op fouten."
 
 # auto-translated
 #. Title of the updates section.
@@ -1322,11 +1322,11 @@ msgstr "Vouw het Raspberry Pi-bestandssysteem uit"
 #. filesystem.
 #: templates/info.html:562
 msgid ""
-"If you just installed the pre-built pikaraoke pi image and your SD card is larger than 4GB,\n"
+"If you just installed the pre-built biaoke pi image and your SD card is larger than 4GB,\n"
 "\t\t\t\t\t\t\tyou may want to expand the filesystem to utilize the remaining space. You only need to do this once.\n"
 "\t\t\t\t\t\t\tThis will reboot the system."
 msgstr ""
-"Als je zojuist de vooraf gebouwde pikaraoke pi-image hebt geïnstalleerd en je SD-kaart groter is dan 4 GB,\n"
+"Als je zojuist de vooraf gebouwde biaoke pi-image hebt geïnstalleerd en je SD-kaart groter is dan 4 GB,\n"
 "\t\t\t\t\t\t\tMisschien wilt u het bestandssysteem uitbreiden om de resterende ruimte te benutten. U hoeft dit slechts één keer te doen.\n"
 "\t\t\t\t\t\t\tHierdoor wordt het systeem opnieuw opgestart."
 
@@ -1344,7 +1344,7 @@ msgstr "Uitloggen"
 
 # auto-translated
 #. Title of the section on shutting down / turning off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:593
 msgid "Shutdown"
 msgstr "Afsluiten"
@@ -1360,20 +1360,20 @@ msgstr ""
 "de juiste manier af om gegevenscorruptie te voorkomen."
 
 # auto-translated
-#. Text for button which turns off Pikaraoke for everyone using it at your
+#. Text for button which turns off Biaoke for everyone using it at your
 #. house.
 #: templates/info.html:607
-msgid "Quit Pikaraoke"
+msgid "Quit Biaoke"
 msgstr "Stop met Picaraoke"
 
 # auto-translated
-#. Text for button which reboots the machine running Pikaraoke.
+#. Text for button which reboots the machine running Biaoke.
 #: templates/info.html:610
 msgid "Reboot System"
 msgstr "Start het systeem opnieuw op"
 
 # auto-translated
-#. Text for button which turn soff the machine running Pikaraoke.
+#. Text for button which turn soff the machine running Biaoke.
 #: templates/info.html:613
 msgid "Shutdown System"
 msgstr "Systeem afsluiten"
@@ -1633,7 +1633,7 @@ msgstr "Jouw score"
 #: templates/splash.html:132
 msgid ""
 "Due to limitations with browser permissions, you must interact\n"
-"      with the page once before it allows autoplay of videos. Pikaraoke will not\n"
+"      with the page once before it allows autoplay of videos. Biaoke will not\n"
 "      play otherwise. Click the button below to\n"
 "      <a onClick=\"handleConfirmation()\">confirm</a>."
 msgstr ""

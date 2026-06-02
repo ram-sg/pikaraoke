@@ -5,9 +5,9 @@ from flask import flash, jsonify, redirect, url_for
 from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
-from pikaraoke.lib.current_app import broadcast_event, get_karaoke_instance, is_admin
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.routes.splash import _get_active_score_phrases
+from biaoke.lib.current_app import broadcast_event, get_karaoke_instance, is_admin
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.routes.splash import _get_active_score_phrases
 
 _ = flask_babel.gettext
 

@@ -5,7 +5,7 @@ import wave
 
 import pytest
 
-from pikaraoke.lib.scoring import ScoreAnalysisError, analyze_wav_file
+from biaoke.lib.scoring import ScoreAnalysisError, analyze_wav_file
 
 
 def write_wav(path, samples, sample_rate=8000):

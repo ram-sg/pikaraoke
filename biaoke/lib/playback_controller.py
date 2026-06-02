@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Callable
 
 from flask_babel import _
 
-from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.file_resolver import delete_tmp_dir
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.lib.stream_manager import PlaybackResult, StreamManager
+from biaoke.lib.events import EventSystem
+from biaoke.lib.file_resolver import delete_tmp_dir
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.stream_manager import PlaybackResult, StreamManager
 
 if TYPE_CHECKING:
     import subprocess

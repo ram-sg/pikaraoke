@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from pikaraoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.preference_manager import PreferenceManager
 
 
 @pytest.fixture
@@ -373,7 +373,7 @@ class MinimalKaraoke:
         self.preferences = PreferenceManager(config_file_path, target=self)
 
     # Import the actual _load_preferences method to test
-    from pikaraoke.karaoke import Karaoke
+    from biaoke.karaoke import Karaoke
 
     _load_preferences = Karaoke._load_preferences
 
@@ -433,7 +433,7 @@ def test_load_preferences_boolean_flag_handling(temp_config_file):
 def test_set_preserves_existing_preferences_across_instances(temp_config_file):
     """Regression test: set() should preserve existing preferences when called from new instance.
 
-    Bug scenario (issue #XXX): Running `pikaraoke --hide-url` would wipe all other
+    Bug scenario (issue #XXX): Running `biaoke --hide-url` would wipe all other
     preferences from config.ini. This happened because hide_url is first in DEFAULTS,
     and set() didn't read the config file before writing.
 

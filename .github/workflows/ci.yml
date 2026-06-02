@@ -74,11 +74,11 @@ jobs:
       if: runner.os == 'macOS'
       run: brew install ffmpeg # override ffmpeg-full install for mac because it adds minutes to the test job
 
-    - name: Install, launch and verify Pikaraoke (Unix)
+    - name: Install, launch and verify Biaoke (Unix)
       if: runner.os != 'Windows'
       run: ./build_scripts/ci/smoketest.sh
 
-    - name: Install, launch and verify Pikaraoke (Windows)
+    - name: Install, launch and verify Biaoke (Windows)
       if: runner.os == 'Windows'
       shell: powershell
       run: ./build_scripts/ci/smoketest.ps1
@@ -94,7 +94,7 @@ jobs:
       uses: astral-sh/setup-uv@v4
 
     - name: Run tests
-      run: uv run pytest tests/ -v --cov=pikaraoke --cov-report=term-missing --cov-report=xml:coverage.xml
+      run: uv run pytest tests/ -v --cov=biaoke --cov-report=term-missing --cov-report=xml:coverage.xml
 
   docker-smoketest:
     runs-on: ubuntu-latest
@@ -113,13 +113,13 @@ jobs:
         file: build_scripts/docker/Dockerfile
         push: false
         load: true
-        tags: pikaraoke-ci-test-amd64:latest
+        tags: biaoke-ci-test-amd64:latest
         cache-from: type=gha,scope=docker-build
         cache-to: type=gha,mode=max,scope=docker-build
 
     - name: Verify Runtime (amd64)
       run: |
-        ./build_scripts/ci/docker-smoketest.sh pikaraoke-ci-test-amd64:latest pikaraoke-test-amd64
+        ./build_scripts/ci/docker-smoketest.sh biaoke-ci-test-amd64:latest biaoke-test-amd64
 
 
   docker-smoketest-arm64:
@@ -140,10 +140,10 @@ jobs:
         platforms: linux/arm64
         push: false
         load: true
-        tags: pikaraoke-ci-test-arm64:latest
+        tags: biaoke-ci-test-arm64:latest
         cache-from: type=gha,scope=docker-build-arm64
         cache-to: type=gha,mode=max,scope=docker-build-arm64
 
     - name: Verify Runtime (arm64)
       run: |
-        ./build_scripts/ci/docker-smoketest.sh pikaraoke-ci-test-arm64:latest pikaraoke-test-arm64
+        ./build_scripts/ci/docker-smoketest.sh biaoke-ci-test-arm64:latest biaoke-test-arm64

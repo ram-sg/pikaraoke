@@ -8,8 +8,8 @@ import time
 import zipfile
 from sys import maxsize
 
-from pikaraoke.lib.ffmpeg import get_media_duration
-from pikaraoke.lib.get_platform import get_platform
+from biaoke.lib.ffmpeg import get_media_duration
+from biaoke.lib.get_platform import get_platform
 
 
 def get_tmp_dir() -> str:

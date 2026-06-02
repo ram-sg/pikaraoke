@@ -9,10 +9,10 @@ from flask import Flask
 if not hasattr(werkzeug, "__version__"):
     werkzeug.__version__ = "3.0.0"
 
-from pikaraoke.lib.events import EventSystem
-from pikaraoke.lib.preference_manager import PreferenceManager
-from pikaraoke.lib.queue_manager import QueueManager
-from pikaraoke.routes.queue import queue_bp
+from biaoke.lib.events import EventSystem
+from biaoke.lib.preference_manager import PreferenceManager
+from biaoke.lib.queue_manager import QueueManager
+from biaoke.routes.queue import queue_bp
 
 
 @pytest.fixture
@@ -46,10 +46,10 @@ class TestQueueReorderSocketUpdates:
         events.on("now_playing_update", mock_karaoke.update_now_playing_socket)
         return mock_karaoke
 
-    @patch("pikaraoke.routes.queue.is_admin", return_value=True)
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
-    @patch("pikaraoke.routes.queue.broadcast_event")
-    @patch("pikaraoke.routes.queue._", side_effect=lambda x: x)
+    @patch("biaoke.routes.queue.is_admin", return_value=True)
+    @patch("biaoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.broadcast_event")
+    @patch("biaoke.routes.queue._", side_effect=lambda x: x)
     def test_reorder_updates_now_playing_socket(
         self,
         mock_gettext,
@@ -67,10 +67,10 @@ class TestQueueReorderSocketUpdates:
         assert json.loads(response.data)["success"] is True
         queue_with_events.update_now_playing_socket.assert_called_once()
 
-    @patch("pikaraoke.routes.queue.is_admin", return_value=True)
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
-    @patch("pikaraoke.routes.queue.broadcast_event")
-    @patch("pikaraoke.routes.queue._", side_effect=lambda x: x)
+    @patch("biaoke.routes.queue.is_admin", return_value=True)
+    @patch("biaoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.broadcast_event")
+    @patch("biaoke.routes.queue._", side_effect=lambda x: x)
     def test_queue_edit_top_updates_now_playing_socket(
         self,
         mock_gettext,
@@ -88,10 +88,10 @@ class TestQueueReorderSocketUpdates:
         assert response.status_code == 302
         queue_with_events.update_now_playing_socket.assert_called_once()
 
-    @patch("pikaraoke.routes.queue.is_admin", return_value=True)
-    @patch("pikaraoke.routes.queue.get_karaoke_instance")
-    @patch("pikaraoke.routes.queue.broadcast_event")
-    @patch("pikaraoke.routes.queue._", side_effect=lambda x: x)
+    @patch("biaoke.routes.queue.is_admin", return_value=True)
+    @patch("biaoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue.broadcast_event")
+    @patch("biaoke.routes.queue._", side_effect=lambda x: x)
     def test_queue_edit_bottom_updates_now_playing_socket(
         self,
         mock_gettext,

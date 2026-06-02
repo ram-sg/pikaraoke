@@ -196,13 +196,13 @@ msgid "You don't have permission to update yt-dlp"
 msgstr "Du har ikke tillatelse til å oppdatere yt-dlp"
 
 # auto-translated
-#. Message shown after quitting pikaraoke.
+#. Message shown after quitting biaoke.
 #: routes/admin.py:97
-msgid "Exiting pikaraoke now!"
-msgstr "Avslutter pikaraoke nå!"
+msgid "Exiting biaoke now!"
+msgstr "Avslutter biaoke nå!"
 
 # auto-translated
-#. Message shown after trying to quit pikaraoke without admin permissions.
+#. Message shown after trying to quit biaoke without admin permissions.
 #: routes/admin.py:104
 msgid "You don't have permission to quit"
 msgstr "Du har ikke tillatelse til å slutte"
@@ -858,7 +858,7 @@ msgstr "Er du sikker på at du vil slutte?"
 
 # auto-translated
 #. Confirmation text whe the user starts to turn off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:75
 msgid "Are you sure you want to shut down?"
 msgstr "Er du sikker på at du vil avslutte?"
@@ -871,7 +871,7 @@ msgstr "Er du sikker på at du vil slette innstillingene dine?"
 
 # auto-translated
 #. Confirmation text whe the user starts to reboot the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:91
 msgid "Are you sure you want to reboot?"
 msgstr "Er du sikker på at du vil starte på nytt?"
@@ -1191,7 +1191,7 @@ msgid "System Data"
 msgstr "Systemdata"
 
 # auto-translated
-#. Header of the information section about the computer running Pikaraoke.
+#. Header of the information section about the computer running Biaoke.
 #: templates/info.html:483
 msgid "System Info"
 msgstr "Systeminfo"
@@ -1221,10 +1221,10 @@ msgid "FFmpeg version:"
 msgstr "FFmpeg versjon:"
 
 # auto-translated
-#. The version of Pikaraoke running right now.
+#. The version of Biaoke running right now.
 #: templates/info.html:497
-msgid "Pikaraoke version:"
-msgstr "Pikaraoke versjon:"
+msgid "Biaoke version:"
+msgstr "Biaoke versjon:"
 
 # auto-translated
 #. Header of the information section about the System stats.
@@ -1233,7 +1233,7 @@ msgid "System stats"
 msgstr "Systemstatistikk"
 
 # auto-translated
-#. The CPU usage of the computer running Pikaraoke.
+#. The CPU usage of the computer running Biaoke.
 #: templates/info.html:509
 msgid "CPU:"
 msgstr "CPU:"
@@ -1244,13 +1244,13 @@ msgid "Loading..."
 msgstr "Laster inn..."
 
 # auto-translated
-#. The disk usage of the computer running Pikaraoke. Used by downloaded songs.
+#. The disk usage of the computer running Biaoke. Used by downloaded songs.
 #: templates/info.html:511
 msgid "Disk Usage:"
 msgstr "Diskbruk:"
 
 # auto-translated
-#. The memory (RAM) usage of the computer running Pikaraoke.
+#. The memory (RAM) usage of the computer running Biaoke.
 #: templates/info.html:513
 msgid "Memory:"
 msgstr "Hukommelse:"
@@ -1285,23 +1285,23 @@ msgstr ""
 
 # auto-translated
 #. Text for the link which will try and update yt-dlp on the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:536
 msgid "Update yt-dlp"
 msgstr "Oppdater yt-dlp"
 
 # auto-translated
 #. Help text which explains why updating yt-dlp can fail. The log is a file on
-#. the machine running Pikaraoke.
+#. the machine running Biaoke.
 #: templates/info.html:540
 msgid ""
 "* This update link above may fail if you don't have proper file "
 "permissions.\n"
-"\t\t\t\t\t\t\tCheck the pikaraoke log for errors."
+"\t\t\t\t\t\t\tCheck the biaoke log for errors."
 msgstr ""
 "* Denne oppdateringslenken ovenfor kan mislykkes hvis du ikke har riktige"
 " filtillatelser.\n"
-"\t\t\t\t\t\t\tSjekk pikaraoke-loggen for feil."
+"\t\t\t\t\t\t\tSjekk biaoke-loggen for feil."
 
 # auto-translated
 #. Title of the updates section.
@@ -1321,13 +1321,13 @@ msgstr "Utvid Raspberry Pi-filsystemet"
 #. filesystem.
 #: templates/info.html:562
 msgid ""
-"If you just installed the pre-built pikaraoke pi image and your SD card "
+"If you just installed the pre-built biaoke pi image and your SD card "
 "is larger than 4GB,\n"
 "\t\t\t\t\t\t\tyou may want to expand the filesystem to utilize the "
 "remaining space. You only need to do this once.\n"
 "\t\t\t\t\t\t\tThis will reboot the system."
 msgstr ""
-"Hvis du nettopp installerte det forhåndsbygde pikaraoke pi-bildet og SD-"
+"Hvis du nettopp installerte det forhåndsbygde biaoke pi-bildet og SD-"
 "kortet ditt er større enn 4 GB,\n"
 "\t\t\t\t\t\t\tDet kan være lurt å utvide filsystemet for å utnytte den "
 "gjenværende plassen. Du trenger bare å gjøre dette én gang.\n"
@@ -1347,7 +1347,7 @@ msgstr "Logg ut"
 
 # auto-translated
 #. Title of the section on shutting down / turning off the machine running
-#. Pikaraoke.
+#. Biaoke.
 #: templates/info.html:593
 msgid "Shutdown"
 msgstr "Avslutning"
@@ -1363,20 +1363,20 @@ msgstr ""
 " unngå datakorrupsjon."
 
 # auto-translated
-#. Text for button which turns off Pikaraoke for everyone using it at your
+#. Text for button which turns off Biaoke for everyone using it at your
 #. house.
 #: templates/info.html:607
-msgid "Quit Pikaraoke"
-msgstr "Avslutt Pikaraoke"
+msgid "Quit Biaoke"
+msgstr "Avslutt Biaoke"
 
 # auto-translated
-#. Text for button which reboots the machine running Pikaraoke.
+#. Text for button which reboots the machine running Biaoke.
 #: templates/info.html:610
 msgid "Reboot System"
 msgstr "Start systemet på nytt"
 
 # auto-translated
-#. Text for button which turn soff the machine running Pikaraoke.
+#. Text for button which turn soff the machine running Biaoke.
 #: templates/info.html:613
 msgid "Shutdown System"
 msgstr "Slå av systemet"
@@ -1639,14 +1639,14 @@ msgstr "Poengsummen din"
 #: templates/splash.html:132
 msgid ""
 "Due to limitations with browser permissions, you must interact\n"
-"      with the page once before it allows autoplay of videos. Pikaraoke "
+"      with the page once before it allows autoplay of videos. Biaoke "
 "will not\n"
 "      play otherwise. Click the button below to\n"
 "      <a onClick=\"handleConfirmation()\">confirm</a>."
 msgstr ""
 "På grunn av begrensninger med nettlesertillatelser, må du samhandle\n"
 "      med siden én gang før den tillater autoavspilling av videoer. "
-"Pikaraoke vil ikke\n"
+"Biaoke vil ikke\n"
 "      spille ellers. Klikk på knappen nedenfor for å\n"
 "      <a onClick=\"handleConfirmation()\">bekreft</a>."
 
