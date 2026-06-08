@@ -20,6 +20,8 @@ splash_bp = Blueprint("splash", __name__)
 _STATIC_ROOT = Path(__file__).resolve().parents[1] / "static"
 _CACHE_BUST_FILES = (
     "js/splash.js",
+    "vocal-coach.css",
+    "vocal-coach.js",
     "score.css",
     "score.js",
     "images/biaoke-splash-bg.png",
@@ -125,5 +127,18 @@ def splash():
         mic_monitor_volume=k.mic_monitor_volume,
         bg_music_volume=k.bg_music_volume,
         has_bg_video=k.bg_video_path is not None,
+        static_version=_static_version(),
+    )
+
+
+@splash_bp.route("/coach")
+@splash_bp.route("/splash/coach")
+def vocal_coach():
+    """Real-time vocal coach display."""
+    return render_template(
+        "vocal_coach.html",
+        site_title=get_site_name(),
+        title="Vocal Coach",
+        blank_page=True,
         static_version=_static_version(),
     )

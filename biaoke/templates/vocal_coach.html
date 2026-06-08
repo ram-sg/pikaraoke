@@ -1,0 +1,92 @@
+{% extends 'base.html' %} {% block scripts %}
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='vocal-coach.css', v=static_version) }}"
+/>
+<script src="{{ url_for('static', filename='vocal-coach.js', v=static_version) }}" defer></script>
+{% endblock %} {% block body %}
+<main class="coach-shell">
+  <div class="coach-backdrop"></div>
+
+  <header class="coach-topbar">
+    <a class="coach-brand" href="/" aria-label="Biaoke home">
+      <span class="coach-brand-mark">B</span>
+      <span>
+        <strong>Biaoke</strong>
+        <small>Vocal Coach</small>
+      </span>
+    </a>
+
+    <div class="coach-controls" aria-label="Vocal coach controls">
+      <label>
+        <span>Mode</span>
+        <select id="coach-preset">
+          <option value="free">Free</option>
+          <option value="sustain">Long notes</option>
+          <option value="scale">Scale</option>
+          <option value="intervals">Intervals</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Range</span>
+        <select id="coach-range">
+          <option value="low">Low</option>
+          <option value="mid" selected>Mid</option>
+          <option value="high">High</option>
+        </select>
+      </label>
+
+      <button id="coach-reset" type="button" title="Reset session">Reset</button>
+      <button id="coach-fullscreen" type="button" title="Fullscreen">Full</button>
+      <button id="coach-start" class="is-primary" type="button">Start</button>
+    </div>
+  </header>
+
+  <section class="coach-stage" aria-label="Pitch training stage">
+    <canvas id="coach-canvas"></canvas>
+
+    <div class="coach-live-readout" aria-live="polite">
+      <div>
+        <span id="coach-note">--</span>
+        <small id="coach-frequency">-- Hz</small>
+      </div>
+      <div id="coach-cents" class="coach-cents">--</div>
+    </div>
+
+    <div class="coach-target-panel">
+      <span>Target</span>
+      <strong id="coach-target-note">--</strong>
+      <small id="coach-target-state">Free pitch</small>
+      <div class="coach-target-progress">
+        <i id="coach-target-progress-fill"></i>
+      </div>
+    </div>
+
+    <div class="coach-status" id="coach-status">Mic idle</div>
+  </section>
+
+  <section class="coach-metrics" aria-label="Session metrics">
+    <article>
+      <span>Accuracy</span>
+      <strong id="coach-accuracy">--</strong>
+      <div><i id="coach-accuracy-fill"></i></div>
+    </article>
+    <article>
+      <span>Timing</span>
+      <strong id="coach-timing">--</strong>
+      <div><i id="coach-timing-fill"></i></div>
+    </article>
+    <article>
+      <span>Stability</span>
+      <strong id="coach-stability">--</strong>
+      <div><i id="coach-stability-fill"></i></div>
+    </article>
+    <article>
+      <span>Coverage</span>
+      <strong id="coach-coverage">--</strong>
+      <div><i id="coach-coverage-fill"></i></div>
+    </article>
+  </section>
+</main>
+{% endblock %}

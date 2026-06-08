@@ -1,5 +1,6 @@
 """Tests for splash routes — score phrase helpers and endpoint."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +20,8 @@ from biaoke.routes.splash import (
 
 @pytest.fixture
 def app():
-    test_app = Flask(__name__)
+    template_folder = Path(__file__).resolve().parents[2] / "biaoke" / "templates"
+    test_app = Flask(__name__, template_folder=str(template_folder))
     Babel(test_app)
     test_app.register_blueprint(splash_bp)
     return test_app
@@ -102,3 +104,25 @@ class TestScorePhrasesEndpoint:
         data = response.get_json()
         assert set(data.keys()) == {"low", "mid", "high"}
         assert data["low"] == ["Bad", "Terrible"]
+
+
+class TestVocalCoachEndpoint:
+    """Tests for the vocal coach splash variant."""
+
+    @patch("biaoke.routes.splash.get_site_name", return_value="Biaoke")
+    def test_vocal_coach_route_renders_assets(self, mock_get_site_name, client):
+        response = client.get("/splash/coach")
+
+        assert response.status_code == 200
+        assert b"vocal-coach.css" in response.data
+        assert b"vocal-coach.js" in response.data
+        assert b"Vocal Coach" in response.data
+        mock_get_site_name.assert_called_once()
+
+    @patch("biaoke.routes.splash.get_site_name", return_value="Biaoke")
+    def test_vocal_coach_short_alias(self, mock_get_site_name, client):
+        response = client.get("/coach")
+
+        assert response.status_code == 200
+        assert b"vocal-coach.js" in response.data
+        mock_get_site_name.assert_called_once()
