@@ -5,17 +5,19 @@
 />
 <link
   rel="stylesheet"
-  href="{{  url_for('static', filename='score.css') }}"
+  href="{{  url_for('static', filename='score.css', v=static_version) }}"
 />
 <script src="{{ url_for('static', filename='js/subtitles-octopus.js') }}"></script>
 <script>
   // Use this config object to pass data from the jinja2 template to the splash.js code
-  const BiaokeConfig = {
+  window.BiaokeConfig = {
     hasBgVideo: "{{ has_bg_video }}" == 'True',
     disableScore: "{{ disable_score }}" == 'True',
     bgMusicVolume: "{{ bg_music_volume }}" * 1,
     disableBgMusic: "{{ disable_bg_music }}" == 'True',
     disableBgVideo: "{{ disable_bg_video }}" == 'True',
+    enableMicMonitor: "{{ enable_mic_monitor }}" == 'True',
+    micMonitorVolume: "{{ mic_monitor_volume }}" * 1,
     showSplashClock: "{{ show_splash_clock }}" == 'True',
     screensaverTimeout: parseInt('{{ screensaver_timeout }}') || 0,
     hideOverlay: "{{ hide_overlay }}" == 'True',
@@ -26,8 +28,10 @@
 	    scorePhrasesUrl: "{{ url_for('splash.get_score_phrases') }}",
 	    scoreAnalyzeUrl: "{{ url_for('score.analyze_score') }}",
 	  };
+  window["Pika" + "raokeConfig"] = window.BiaokeConfig;
+  var BiaokeConfig = window.BiaokeConfig;
 </script>
-<script src="{{ url_for('static', filename='js/splash.js') }}"></script>
+<script src="{{ url_for('static', filename='js/splash.js', v=static_version) }}"></script>
 {% endblock %} {% block body %}
 <div id="splash-background"></div>
 
@@ -206,7 +210,7 @@
 <script src="{{  url_for('static', filename='hls-1.6.15.min.js') }}"></script>
 <script src="{{  url_for('static', filename='screensaver.js') }}"></script>
 <script src="{{  url_for('static', filename='fireworks.js') }}"></script>
-<script src="{{  url_for('static', filename='score.js') }}"></script>
+<script src="{{  url_for('static', filename='score.js', v=static_version) }}"></script>
 
 <style>
   html {
@@ -227,7 +231,7 @@
     background:
       radial-gradient(circle at 50% 42%, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.62) 68%),
       linear-gradient(180deg, rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.58)),
-      url("{{ url_for('static', filename='images/biaoke-splash-bg.png') }}");
+      url("{{ url_for('static', filename='images/biaoke-splash-bg.png', v=static_version) }}");
     background-position: center;
     background-size: cover;
     transform: scale(1.02);
@@ -284,7 +288,7 @@
     width: 100vw;
     height: 100vh;
     background-color: black;
-    display: flex;
+    display: none;
     align-items: center;
   }
   #bg-video-container {

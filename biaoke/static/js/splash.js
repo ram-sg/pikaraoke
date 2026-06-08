@@ -9,6 +9,7 @@ let autoplayConfirmed = false;
 let volume = 0.85;
 const playbackStartTimeout = 10000;
 const bgMediaResumeDelay = 2000;
+const scoreCaptureMaxSeconds = 90;
 let isScoreShown = false;
 const hasBgVideo = BiaokeConfig.hasBgVideo;
 let currentVideoUrl = null;
@@ -30,6 +31,12 @@ let scoreRecorder = null;
 let scoreChunks = [];
 let scoreRecordingMeta = null;
 let scoreCaptureReady = false;
+let scoreRecordingBlob = null;
+let scoreStopPromise = null;
+let scoreAutoStopTimeout = null;
+let micMonitorContext = null;
+let micMonitorSource = null;
+let micMonitorGain = null;
 
 // Browser detection
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -103,9 +110,14 @@ const handleConfirmation = () => {
   updateBackgroundMediaState(true);
   loadNowPlaying();
 };
+window.handleConfirmation = handleConfirmation;
 
 const hideVideo = () => {
   $("#video-container").hide();
+}
+
+const showVideo = () => {
+  $("#video-container").css("display", "flex");
 }
 
 const getScoreMimeType = () => {
@@ -119,32 +131,119 @@ const getScoreMimeType = () => {
   return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
+const needsMicrophoneStream = () => !BiaokeConfig.disableScore || BiaokeConfig.enableMicMonitor;
+
+const clampMicMonitorVolume = (value) => {
+  const volume = Number(value);
+  if (!Number.isFinite(volume)) return 0.75;
+  return Math.max(0, Math.min(1, volume));
+}
+
+const getMicAudioConstraints = () => {
+  const browserProcessing = !BiaokeConfig.enableMicMonitor;
+  const constraints = {
+    echoCancellation: browserProcessing,
+    noiseSuppression: browserProcessing,
+    autoGainControl: false,
+  };
+  if (BiaokeConfig.enableMicMonitor) {
+    constraints.latency = { ideal: 0.005, max: 0.02 };
+    constraints.channelCount = { ideal: 1 };
+    constraints.sampleRate = { ideal: 48000 };
+  }
+  return constraints;
+}
+
+const setMicMonitorVolume = (value) => {
+  BiaokeConfig.micMonitorVolume = clampMicMonitorVolume(value);
+  if (micMonitorGain) micMonitorGain.gain.value = BiaokeConfig.micMonitorVolume;
+}
+
+const stopMicMonitor = () => {
+  if (micMonitorSource) {
+    try { micMonitorSource.disconnect(); } catch (_e) {}
+    micMonitorSource = null;
+  }
+  if (micMonitorGain) {
+    try { micMonitorGain.disconnect(); } catch (_e) {}
+    micMonitorGain = null;
+  }
+  if (micMonitorContext) {
+    const context = micMonitorContext;
+    micMonitorContext = null;
+    if (context.state !== "closed") {
+      context.close().catch((e) => console.log("Could not close microphone output.", e));
+    }
+  }
+}
+
+const stopMicrophoneStream = () => {
+  stopMicMonitor();
+  if (scoreMediaStream) {
+    scoreMediaStream.getTracks().forEach((track) => track.stop());
+    scoreMediaStream = null;
+  }
+  scoreCaptureReady = false;
+}
+
+const startMicMonitor = async () => {
+  if (!BiaokeConfig.enableMicMonitor || !scoreMediaStream) return;
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      console.log("Microphone output is not supported in this browser.");
+      return;
+    }
+    if (!micMonitorContext) {
+      try {
+        micMonitorContext = new AudioContextClass({ latencyHint: "interactive" });
+      } catch (_e) {
+        micMonitorContext = new AudioContextClass();
+      }
+    }
+    if (micMonitorContext.state === "suspended") {
+      await micMonitorContext.resume();
+    }
+    if (!micMonitorSource) {
+      micMonitorSource = micMonitorContext.createMediaStreamSource(scoreMediaStream);
+      micMonitorGain = micMonitorContext.createGain();
+      micMonitorSource.connect(micMonitorGain);
+      micMonitorGain.connect(micMonitorContext.destination);
+    }
+    setMicMonitorVolume(BiaokeConfig.micMonitorVolume);
+  } catch (e) {
+    console.log("Could not start microphone output.", e);
+    stopMicMonitor();
+  }
+}
+
 const setupScoreCapture = async () => {
-  if (scoreCaptureReady || BiaokeConfig.disableScore) return;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
-    console.log("Microphone scoring is not supported in this browser.");
+  if (scoreCaptureReady || !needsMicrophoneStream()) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    console.log("Microphone access is not supported in this browser.");
     return;
+  }
+  if (!BiaokeConfig.disableScore && !window.MediaRecorder) {
+    console.log("Microphone scoring is not supported in this browser.");
   }
   try {
     scoreMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: false,
-      },
+      audio: getMicAudioConstraints(),
       video: false,
     });
     scoreCaptureReady = true;
   } catch (e) {
-    console.log("Microphone permission not granted; real scoring disabled.", e);
+    console.log("Microphone permission not granted; microphone features disabled.", e);
   }
 }
 
 const startScoreCapture = () => {
-  if (!isMaster || BiaokeConfig.disableScore || !scoreMediaStream) return;
+  if (!isMaster || BiaokeConfig.disableScore || !scoreMediaStream || !window.MediaRecorder) return;
   if (scoreRecorder && scoreRecorder.state === "recording") return;
 
   scoreChunks = [];
+  scoreRecordingBlob = null;
+  scoreStopPromise = null;
   scoreRecordingMeta = {
     title: nowPlaying.now_playing || "",
     duration: nowPlaying.now_playing_duration || "",
@@ -159,6 +258,9 @@ const startScoreCapture = () => {
       if (event.data && event.data.size > 0) scoreChunks.push(event.data);
     };
     scoreRecorder.start(1000);
+    scoreAutoStopTimeout = setTimeout(() => {
+      stopScoreCapture(false);
+    }, scoreCaptureMaxSeconds * 1000);
   } catch (e) {
     console.log("Could not start microphone scoring.", e);
   }
@@ -186,15 +288,38 @@ const uploadScoreRecording = async (blob) => {
 }
 
 const stopScoreCapture = async (analyze = false) => {
-  if (!scoreRecorder || scoreRecorder.state !== "recording") return null;
+  if (scoreAutoStopTimeout) {
+    clearTimeout(scoreAutoStopTimeout);
+    scoreAutoStopTimeout = null;
+  }
+
+  if (scoreStopPromise) {
+    await scoreStopPromise;
+    if (analyze && scoreRecordingBlob) {
+      const blob = scoreRecordingBlob;
+      scoreRecordingBlob = null;
+      return uploadScoreRecording(blob);
+    }
+    return null;
+  }
+
+  if (!scoreRecorder || scoreRecorder.state !== "recording") {
+    if (analyze && scoreRecordingBlob) {
+      const blob = scoreRecordingBlob;
+      scoreRecordingBlob = null;
+      return uploadScoreRecording(blob);
+    }
+    return null;
+  }
 
   const recorder = scoreRecorder;
-  return new Promise((resolve) => {
+  scoreStopPromise = new Promise((resolve) => {
     recorder.onstop = async () => {
       try {
         const blob = new Blob(scoreChunks, { type: recorder.mimeType || "audio/webm" });
         scoreRecorder = null;
         if (!analyze || blob.size < 1024) {
+          if (blob.size >= 1024) scoreRecordingBlob = blob;
           resolve(null);
           return;
         }
@@ -204,20 +329,25 @@ const stopScoreCapture = async (analyze = false) => {
         resolve(null);
       } finally {
         scoreChunks = [];
-        scoreRecordingMeta = null;
+        scoreStopPromise = null;
       }
     };
     recorder.stop();
   });
+  return scoreStopPromise;
 }
 
 const endSong = async (reason = null, showScore = false) => {
-  const realScore = await stopScoreCapture(showScore && !BiaokeConfig.disableScore);
+  stopMicMonitor();
   if (showScore && !BiaokeConfig.disableScore) {
+    const realScorePromise = stopScoreCapture(true);
     isScoreShown = true;
-    await startScore("/static/", realScore);
+    await startScore("/static/", realScorePromise);
     isScoreShown = false;
+  } else {
+    await stopScoreCapture(false);
   }
+  scoreRecordingMeta = null;
   currentVideoUrl = null;
   if (hlsInstance) {
     hlsInstance.destroy();
@@ -458,7 +588,7 @@ const handleNowPlayingUpdate = (np) => {
       duration.hide();
     }
 
-    $("#video-container").show();
+    showVideo();
 
     video.play().catch(err => {
       console.error('Play failed:', err);
@@ -543,8 +673,10 @@ const setupOverlayMenus = () => {
 const setupVideoPlayer = () => {
   $('#video-container').hide();
   const video = getVideoPlayer();
-  video.addEventListener("play", () => {
-    $("#video-container").show();
+  video.addEventListener("play", async () => {
+    showVideo();
+    await setupScoreCapture();
+    await startMicMonitor();
     startScoreCapture();
     if (isMaster) {
       setTimeout(() => { socket.emit("start_song") }, 1200);
@@ -623,7 +755,22 @@ const toggleBGMedia = (configKey, playFn, disabled) => {
 const PREFERENCE_EFFECTS = {
   disable_bg_video:    (v) => toggleBGMedia("disableBgVideo", playBGVideo, v),
   disable_bg_music:    (v) => toggleBGMedia("disableBgMusic", playBGMusic, v),
-  disable_score:       (v) => { BiaokeConfig.disableScore = v; },
+  disable_score:       (v) => {
+    BiaokeConfig.disableScore = v;
+    if (needsMicrophoneStream()) setupScoreCapture();
+    else stopMicrophoneStream();
+  },
+  enable_mic_monitor:  async (v) => {
+    BiaokeConfig.enableMicMonitor = v;
+    if (v) {
+      await setupScoreCapture();
+      if (isMediaPlaying(getVideoPlayer())) await startMicMonitor();
+    } else {
+      stopMicMonitor();
+      if (!needsMicrophoneStream()) stopMicrophoneStream();
+    }
+  },
+  mic_monitor_volume:  (v) => { setMicMonitorVolume(v); },
   show_splash_clock:   (v) => {
     BiaokeConfig.showSplashClock = v;
     v ? startClock() : (stopClock(), $("#clock").hide());
@@ -682,6 +829,7 @@ const setupSocketEvents = () => {
     const video = getVideoPlayer();
     const currVolume = video.volume;
     if (!video.paused) {
+      stopMicMonitor();
       $(video).animate({ volume: 0 }, 1000, () => {
         video.pause();
         video.volume = currVolume;
@@ -699,6 +847,7 @@ const setupSocketEvents = () => {
   });
   socket.on('skip', (reason) => {
     stopScoreCapture(false);
+    stopMicMonitor();
     const video = getVideoPlayer();
     const currVolume = video.volume;
     if (isMediaPlaying(video)) {

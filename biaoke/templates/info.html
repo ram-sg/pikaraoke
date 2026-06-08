@@ -32,7 +32,7 @@
 				let timeoutId = setTimeout(function() {
 					$this.attr("data-start-value", val);
 
-					if (pref == "bg_music_volume" || pref == "volume") {
+					if (pref == "bg_music_volume" || pref == "volume" || pref == "mic_monitor_volume") {
 						val = val / 100;
 					}
 					changePreferences(pref, val);
@@ -296,6 +296,12 @@
 					</div>
 
 					<div class="user-preference-container">
+						<input id="pref-mic-monitor" type="checkbox" class="user-preference-checkbox checkbox" data-pref="enable_mic_monitor" {% if enable_mic_monitor == True %}checked{% endif %}>
+						<label class="label" for="pref-mic-monitor">{# MSG: Checkbox label which enable/disables microphone output on the splash screen #} {% trans %}Play microphone through the splash screen audio during songs{% endtrans %}
+						</label>
+					</div>
+
+					<div class="user-preference-container">
 						<input id="pref-notifications" type="checkbox" class="user-preference-checkbox checkbox" data-pref="hide_notifications" {% if hide_notifications == True %}checked{% endif %}>
 						<label class="label" for="pref-notifications">{# MSG: Checkbox label which enable/disables notifications on the splash screen #} {% trans %}Hide notifications{% endtrans %}
 						</label>
@@ -327,6 +333,12 @@
 					<div class="user-preference-container is-align-items-center">
 						<input id="bg-music-volume" class="user-preference-input input" type="number" min="0" max="100" step="5" data-pref="bg_music_volume" data-start-value="{{ bg_music_volume }}" value="{{ bg_music_volume }}" />
 						<label class="label" for="bg-music-volume">{# MSG: Numberbox label for setting the background music volume#} {% trans %}Volume of the background music (min 0, max 100){% endtrans %}
+						</label>
+					</div>
+
+					<div class="user-preference-container is-align-items-center">
+						<input id="pref-mic-monitor-volume" class="user-preference-input input" type="number" min="0" max="100" step="5" data-pref="mic_monitor_volume" data-start-value="{{ mic_monitor_volume }}" value="{{ mic_monitor_volume }}" />
+						<label class="label" for="pref-mic-monitor-volume">{# MSG: Numberbox label for setting the microphone output volume #} {% trans %}Microphone output volume during songs (min 0, max 100){% endtrans %}
 						</label>
 					</div>
 

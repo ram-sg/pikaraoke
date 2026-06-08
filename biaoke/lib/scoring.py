@@ -14,6 +14,7 @@ from pathlib import Path
 
 MAX_SCORE_UPLOAD_BYTES = 80 * 1024 * 1024
 ANALYSIS_SAMPLE_RATE = 8000
+DEFAULT_MAX_ANALYSIS_SECONDS = 90
 FRAME_SECONDS = 0.04
 HOP_SECONDS = 0.05
 MIN_SINGING_FREQUENCY = 70
@@ -89,16 +90,39 @@ def analyze_wav_file(path: str | os.PathLike, *, prefer_torchcrepe: bool = True)
     if len(samples) < sample_rate:
         raise ScoreAnalysisError("Recording is too short to score")
 
+    original_duration = len(samples) / sample_rate
+    samples = _limit_samples_for_fast_analysis(samples, sample_rate)
+    analysis_duration = len(samples) / sample_rate
+
     if prefer_torchcrepe:
         try:
             frames = _extract_pitch_torchcrepe(samples, sample_rate)
             engine = str(get_scoring_engine_status()["engine"])
-            return _score_pitch_frames(frames, engine)
+            return _score_pitch_frames(frames, engine, original_duration, analysis_duration)
         except Exception:
             pass
 
     frames = _extract_pitch_autocorrelation(samples, sample_rate)
-    return _score_pitch_frames(frames, "autocorrelation")
+    return _score_pitch_frames(frames, "autocorrelation", original_duration, analysis_duration)
+
+
+def _max_analysis_seconds() -> int:
+    raw_value = os.environ.get("BIAOKE_SCORE_MAX_ANALYSIS_SECONDS", "")
+    try:
+        return max(20, min(180, int(raw_value)))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_ANALYSIS_SECONDS
+
+
+def _limit_samples_for_fast_analysis(samples: list[float], sample_rate: int) -> list[float]:
+    """Cap analysis length so scoring stays fast on long karaoke tracks."""
+    max_samples = _max_analysis_seconds() * sample_rate
+    if len(samples) <= max_samples:
+        return samples
+
+    # Bias slightly after the intro while keeping one continuous slice for timing metrics.
+    start = int((len(samples) - max_samples) * 0.35)
+    return samples[start : start + max_samples]
 
 
 def _convert_to_analysis_wav(input_path: Path, output_path: Path, ffmpeg_bin: str) -> None:
@@ -276,7 +300,12 @@ def _estimate_pitch_autocorrelation(
     return sample_rate / best_lag, confidence
 
 
-def _score_pitch_frames(frames: list[PitchFrame], engine: str) -> ScoreResult:
+def _score_pitch_frames(
+    frames: list[PitchFrame],
+    engine: str,
+    original_duration: float,
+    analysis_duration: float,
+) -> ScoreResult:
     if not frames:
         raise ScoreAnalysisError("No analyzable audio frames found")
 
@@ -292,27 +321,33 @@ def _score_pitch_frames(frames: list[PitchFrame], engine: str) -> ScoreResult:
                 "voiced_ratio": round(voiced_ratio, 4),
                 "voiced_frames": len(voiced),
                 "total_frames": len(frames),
+                "original_duration_seconds": round(original_duration, 2),
+                "analysis_duration_seconds": round(analysis_duration, 2),
             },
         )
 
     confidence = statistics.mean(frame.confidence for frame in voiced)
     pitch_values = [frame.pitch_hz for frame in voiced if frame.pitch_hz]
     pitch_range_cents = _pitch_range_cents(pitch_values)
+    pitch_tuning = _pitch_tuning(voiced)
     stability = _pitch_stability(voiced)
+    timing = _timing_consistency(frames)
     volume_consistency = _volume_consistency([frame.rms for frame in voiced])
     coverage = min(1.0, voiced_ratio / 0.45)
     range_factor = _clamp((pitch_range_cents - 250.0) / 950.0)
 
     weighted_score = (
-        0.32 * coverage
-        + 0.30 * confidence
-        + 0.20 * stability
-        + 0.10 * volume_consistency
-        + 0.08 * range_factor
+        0.22 * coverage
+        + 0.22 * pitch_tuning
+        + 0.18 * confidence
+        + 0.18 * timing
+        + 0.12 * stability
+        + 0.05 * volume_consistency
+        + 0.03 * range_factor
     )
     score = int(round(_clamp(weighted_score) * 100))
     tier = "high" if score >= 70 else "mid" if score >= 40 else "low"
-    review = _review_for_score(score, coverage, confidence, stability)
+    review = _review_for_score(score, coverage, confidence, stability, pitch_tuning, timing)
 
     return ScoreResult(
         score=score,
@@ -323,11 +358,15 @@ def _score_pitch_frames(frames: list[PitchFrame], engine: str) -> ScoreResult:
             "voiced_ratio": round(voiced_ratio, 4),
             "coverage": round(coverage, 4),
             "pitch_confidence": round(confidence, 4),
+            "pitch_tuning": round(pitch_tuning, 4),
             "pitch_stability": round(stability, 4),
+            "timing_consistency": round(timing, 4),
             "volume_consistency": round(volume_consistency, 4),
             "pitch_range_cents": round(pitch_range_cents, 1),
             "voiced_frames": len(voiced),
             "total_frames": len(frames),
+            "original_duration_seconds": round(original_duration, 2),
+            "analysis_duration_seconds": round(analysis_duration, 2),
         },
     )
 
@@ -356,6 +395,63 @@ def _pitch_stability(voiced_frames: list[PitchFrame]) -> float:
     return _clamp(1.0 - median_delta / 220.0)
 
 
+def _pitch_tuning(voiced_frames: list[PitchFrame]) -> float:
+    """Score how close sung pitches are to equal-tempered note centers."""
+    offsets = []
+    for frame in voiced_frames:
+        if not frame.pitch_hz or frame.pitch_hz <= 0:
+            continue
+        midi = 69.0 + 12.0 * math.log2(frame.pitch_hz / 440.0)
+        offsets.append(abs((midi - round(midi)) * 100.0))
+    if not offsets:
+        return 0.0
+    median_offset = statistics.median(offsets)
+    return _clamp(1.0 - median_offset / 42.0)
+
+
+def _timing_consistency(frames: list[PitchFrame]) -> float:
+    """Estimate phrase timing from vocal on/off segments without a reference track."""
+    segments = _voiced_segments(frames)
+    if not segments:
+        return 0.0
+    duration = max(frames[-1].time + HOP_SECONDS, HOP_SECONDS)
+    segment_lengths = [end - start for start, end in segments]
+    healthy_segments = [
+        length for length in segment_lengths if 0.18 <= length <= 9.0
+    ]
+    segment_shape = len(healthy_segments) / len(segment_lengths)
+
+    phrases_per_minute = len(segments) / max(duration / 60.0, 1e-6)
+    phrase_density = _clamp(phrases_per_minute / 18.0)
+    if phrases_per_minute > 42:
+        phrase_density *= _clamp(1.0 - (phrases_per_minute - 42.0) / 35.0)
+
+    if len(segment_lengths) >= 3:
+        mean_length = statistics.mean(segment_lengths)
+        spread = statistics.pstdev(segment_lengths)
+        regularity = _clamp(1.0 - spread / max(mean_length * 1.6, 1e-6))
+    else:
+        regularity = 0.45
+
+    return _clamp(0.45 * segment_shape + 0.35 * phrase_density + 0.20 * regularity)
+
+
+def _voiced_segments(frames: list[PitchFrame]) -> list[tuple[float, float]]:
+    segments = []
+    start = None
+    previous_time = 0.0
+    for frame in frames:
+        if frame.voiced and start is None:
+            start = frame.time
+        elif not frame.voiced and start is not None:
+            segments.append((start, previous_time + HOP_SECONDS))
+            start = None
+        previous_time = frame.time
+    if start is not None:
+        segments.append((start, previous_time + HOP_SECONDS))
+    return segments
+
+
 def _volume_consistency(rms_values: list[float]) -> float:
     if len(rms_values) < 4:
         return 0.0
@@ -366,13 +462,26 @@ def _volume_consistency(rms_values: list[float]) -> float:
     return _clamp(1.0 - spread / (median * 1.6))
 
 
-def _review_for_score(score: int, coverage: float, confidence: float, stability: float) -> str:
+def _review_for_score(
+    score: int,
+    coverage: float,
+    confidence: float,
+    stability: float,
+    pitch_tuning: float,
+    timing: float,
+) -> str:
     if coverage < 0.25:
         return "The mic captured only a small amount of singing."
     if confidence < 0.45:
         return "The voice was detected, but pitch clarity was inconsistent."
+    if pitch_tuning < 0.45:
+        return "Good energy, but the pitch center drifted away from the notes."
+    if timing < 0.42:
+        return "Pitch was present, but the phrase timing felt loose."
+    if score >= 85:
+        return "Excellent pitch center and confident timing."
     if score >= 70:
-        return "Strong vocal capture with clear pitch and steady delivery."
+        return "Strong pitch and timing with steady delivery."
     if stability < 0.35:
         return "Good vocal presence, but pitch stability needs work."
     return "Solid vocal capture with room to tighten pitch and timing."

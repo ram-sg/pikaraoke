@@ -275,6 +275,8 @@ def test_preference_manager_defaults_exist():
         "bg_music_volume",
         "disable_bg_video",
         "disable_score",
+        "enable_mic_monitor",
+        "mic_monitor_volume",
         "limit_user_songs_by",
         "enable_fair_queue",
         "cdg_pixel_scaling",
@@ -304,6 +306,7 @@ def test_preference_manager_defaults_types():
     assert isinstance(defaults["disable_bg_music"], bool)
     assert isinstance(defaults["disable_bg_video"], bool)
     assert isinstance(defaults["disable_score"], bool)
+    assert isinstance(defaults["enable_mic_monitor"], bool)
     assert isinstance(defaults["enable_fair_queue"], bool)
     assert isinstance(defaults["cdg_pixel_scaling"], bool)
 
@@ -317,6 +320,7 @@ def test_preference_manager_defaults_types():
     # Float preferences
     assert isinstance(defaults["volume"], float)
     assert isinstance(defaults["bg_music_volume"], float)
+    assert isinstance(defaults["mic_monitor_volume"], float)
 
     # String preferences
     assert isinstance(defaults["low_score_phrases"], str)

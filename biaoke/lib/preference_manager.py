@@ -36,6 +36,8 @@ class PreferenceManager:
         "bg_music_volume": 0.3,
         "disable_bg_video": False,
         "disable_score": False,
+        "enable_mic_monitor": True,
+        "mic_monitor_volume": 0.75,
         "limit_user_songs_by": 0,
         "enable_fair_queue": False,
         "cdg_pixel_scaling": False,

@@ -1,3 +1,5 @@
+name: biaoke
+
 services:
   biaoke:
     # --- BUILD OPTION ---

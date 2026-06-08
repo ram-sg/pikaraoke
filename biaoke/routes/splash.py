@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+from pathlib import Path
 
 import flask_babel
 from flask import jsonify, render_template
@@ -15,6 +16,28 @@ _ = flask_babel.gettext
 
 
 splash_bp = Blueprint("splash", __name__)
+
+_STATIC_ROOT = Path(__file__).resolve().parents[1] / "static"
+_CACHE_BUST_FILES = (
+    "js/splash.js",
+    "score.css",
+    "score.js",
+    "images/biaoke-splash-bg.png",
+    "sounds/applause-xl.mp3",
+    "sounds/boo-soft.mp3",
+    "sounds/boo-strong.mp3",
+)
+
+
+def _static_version() -> str:
+    """Return a cache-busting token for splash assets."""
+    mtimes = []
+    for filename in _CACHE_BUST_FILES:
+        try:
+            mtimes.append(int((_STATIC_ROOT / filename).stat().st_mtime))
+        except OSError:
+            pass
+    return str(max(mtimes, default=1))
 
 
 def _default_score_phrases() -> dict[str, list[str]]:
@@ -98,6 +121,9 @@ def splash():
         disable_bg_music=k.disable_bg_music,
         disable_bg_video=k.disable_bg_video,
         disable_score=k.disable_score,
+        enable_mic_monitor=k.enable_mic_monitor,
+        mic_monitor_volume=k.mic_monitor_volume,
         bg_music_volume=k.bg_music_volume,
         has_bg_video=k.bg_video_path is not None,
+        static_version=_static_version(),
     )
