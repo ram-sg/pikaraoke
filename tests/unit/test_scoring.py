@@ -6,7 +6,15 @@ import wave
 
 import pytest
 
-from biaoke.lib.scoring import ScoreAnalysisError, analyze_wav_file, extract_melody_guide_from_media
+from biaoke.lib.scoring import (
+    PitchFrame,
+    ScoreAnalysisError,
+    _pitch_frames_to_melody_contour,
+    _pitch_frames_to_melody_notes,
+    analyze_wav_file,
+    extract_melody_guide_from_media,
+    midi_to_frequency,
+)
 
 
 def write_wav(path, samples, sample_rate=8000):
@@ -72,3 +80,20 @@ def test_extracts_melody_guide_from_pitched_audio(tmp_path):
     assert guide["contour"]
     assert any(note["midi"] == 60 for note in guide["notes"])
     assert any(59.5 <= point["midi"] <= 60.5 for point in guide["contour"])
+
+
+def test_melody_contour_rejects_isolated_pitch_spikes():
+    frames = [
+        PitchFrame(0.00, midi_to_frequency(60), 0.9, 0.4),
+        PitchFrame(0.05, midi_to_frequency(60.1), 0.9, 0.4),
+        PitchFrame(0.10, midi_to_frequency(72), 0.9, 0.4),
+        PitchFrame(0.15, midi_to_frequency(60.05), 0.9, 0.4),
+        PitchFrame(0.20, midi_to_frequency(60), 0.9, 0.4),
+    ]
+
+    contour = _pitch_frames_to_melody_contour(frames)
+    notes = _pitch_frames_to_melody_notes(frames)
+
+    assert contour
+    assert all(point["midi"] < 61 for point in contour)
+    assert {note["midi"] for note in notes} == {60}

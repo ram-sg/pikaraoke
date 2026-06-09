@@ -12,6 +12,7 @@
   const TRAIL_MIN_CONFIDENCE = 0.52;
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
+  const CONTOUR_TARGET_MAX_GAP_SECONDS = 0.34;
   const DEFAULT_PITCH_BANDS_CENTS = [25, 40, 60, 80, 100, 130, 160, 200, 250, 320];
   const PITCH_BAND_STYLES = [
     { cents: 320, fill: "rgba(207, 77, 67, 0.045)" },
@@ -339,25 +340,99 @@
     return Math.max(0, state.songSync.position + (now - state.songSync.receivedAt) / 1000);
   }
 
-  function currentSongTarget(now) {
-    if (!state.songGuide || !Array.isArray(state.songGuide.notes)) return null;
-    const songTime = songPlaybackTime(now);
-    const notes = state.songGuide.notes;
+  function songNoteAtTime(songTime, notes = songGuideNotes(), graceSeconds = 0) {
     for (let index = 0; index < notes.length; index++) {
       const note = notes[index];
       if (songTime >= note.start && songTime <= note.end) {
-        const duration = Math.max(0.05, note.end - note.start);
-        return {
-          midi: note.midi,
-          index,
-          cycle: "song",
-          duration,
-          progress: clamp((songTime - note.start) / duration, 0, 1),
-          source: "song",
-          songTime,
-        };
+        return { note, index };
       }
     }
+    if (graceSeconds <= 0) return null;
+    let closest = null;
+    let closestDistance = Infinity;
+    for (let index = 0; index < notes.length; index++) {
+      const note = notes[index];
+      const distance = Math.min(Math.abs(songTime - note.start), Math.abs(songTime - note.end));
+      if (distance <= graceSeconds && distance < closestDistance) {
+        closest = { note, index };
+        closestDistance = distance;
+      }
+    }
+    return closest;
+  }
+
+  function contourPointAtSongTime(
+    songTime,
+    contour = songGuideContour(),
+    maxGapSeconds = CONTOUR_TARGET_MAX_GAP_SECONDS
+  ) {
+    if (!Array.isArray(contour) || contour.length === 0) return null;
+
+    let low = 0;
+    let high = contour.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      if (Number(contour[mid].time) < songTime) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    const next = contour[low] || null;
+    const previous = contour[low - 1] || null;
+    if (previous && next) {
+      const previousTime = Number(previous.time);
+      const nextTime = Number(next.time);
+      const gap = nextTime - previousTime;
+      if (gap > 0 && gap <= maxGapSeconds * 2 && songTime >= previousTime && songTime <= nextTime) {
+        const ratio = clamp((songTime - previousTime) / gap, 0, 1);
+        const midi = Number(previous.midi) + (Number(next.midi) - Number(previous.midi)) * ratio;
+        const confidence =
+          Number(previous.confidence ?? 0.6) +
+          (Number(next.confidence ?? 0.6) - Number(previous.confidence ?? 0.6)) * ratio;
+        return { time: songTime, midi, confidence };
+      }
+    }
+
+    const closest = [previous, next]
+      .filter(Boolean)
+      .map((point) => ({ point, distance: Math.abs(Number(point.time) - songTime) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    if (!closest || closest.distance > maxGapSeconds) return null;
+    return {
+      time: songTime,
+      midi: Number(closest.point.midi),
+      confidence: Number(closest.point.confidence ?? 0.6),
+    };
+  }
+
+  function referenceTargetAtSongTime(songTime, notes = songGuideNotes(), contour = songGuideContour()) {
+    const noteMatch = songNoteAtTime(songTime, notes, 0.35);
+    if (!noteMatch) return null;
+
+    const note = noteMatch.note;
+    const duration = Math.max(0.05, Number(note.end) - Number(note.start));
+    const contourPoint = contourPointAtSongTime(songTime, contour);
+    const midi = contourPoint ? contourPoint.midi : Number(note.midi);
+    return {
+      midi,
+      noteMidi: Number(note.midi),
+      index: noteMatch.index,
+      cycle: "song",
+      duration,
+      progress: clamp((songTime - Number(note.start)) / duration, 0, 1),
+      source: contourPoint ? "song-contour" : "song",
+      songTime,
+      confidence: contourPoint ? contourPoint.confidence : Number(note.confidence ?? 0.6),
+    };
+  }
+
+  function currentSongTarget(now) {
+    if (!state.songGuide) return null;
+    const songTime = songPlaybackTime(now);
+    const target = referenceTargetAtSongTime(songTime);
+    if (target) return target;
     return null;
   }
 
@@ -1396,7 +1471,7 @@
 
     if (target) {
       els["coach-target-note"].textContent = noteName(target.midi);
-      if (target.source === "song") {
+      if (String(target.source || "").startsWith("song")) {
         els["coach-target-state"].textContent = `Música ${formatClock(target.songTime || 0)}`;
       } else {
         els["coach-target-state"].textContent = `${Math.round(target.progress * 100)}%`;
@@ -1494,6 +1569,7 @@
 
   function songRoadMidiRange(songTime) {
     const notes = songGuideNotes();
+    const contour = songGuideContour();
     const minTime = songTime - 4;
     const maxTime = songTime + songRoadLookaheadSeconds(songTime, notes);
     const visibleNotes = notes.filter((note) => Number(note.end) >= minTime && Number(note.start) <= maxTime);
@@ -1503,6 +1579,10 @@
       if (!Number.isFinite(midi)) return;
       const outerBand = Math.max(...normalizePitchBands(note.pitchBandsCents)) / 100;
       midiValues.push(midi - outerBand, midi, midi + outerBand);
+    });
+    visibleRoadContour(contour, minTime, maxTime).forEach((point) => {
+      const midi = Number(point.midi);
+      if (Number.isFinite(midi)) midiValues.push(midi - 0.4, midi, midi + 0.4);
     });
 
     if (midiValues.length === 0) return { minMidi: 48, maxMidi: 72 };
@@ -1647,16 +1727,17 @@
     );
   }
 
-  function graphPitchPoint(point, notes) {
+  function graphPitchPoint(point, notes, contour = songGuideContour()) {
     if (!point || Number(point.confidence ?? 1) < TRAIL_MIN_CONFIDENCE) return null;
     const songTime = Number(point.songTime);
     const midi = Number(point.midi);
     if (!Number.isFinite(songTime) || !Number.isFinite(midi)) return null;
-    const target = targetNoteAtSongTime(songTime, notes, 0.35);
+    const target = referenceTargetAtSongTime(songTime, notes, contour);
     if (!target || !Number.isFinite(Number(target.midi))) return null;
 
     const targetMidi = Number(target.midi);
-    const maxBandMidi = Math.max(...normalizePitchBands(target.pitchBandsCents)) / 100;
+    const targetNote = targetNoteAtSongTime(songTime, notes, 0.35);
+    const maxBandMidi = Math.max(...normalizePitchBands(targetNote?.pitchBandsCents)) / 100;
     const deltaMidi = midi - targetMidi;
     return {
       songTime,
@@ -1666,16 +1747,17 @@
     };
   }
 
-  function graphReferencePoint(point, notes) {
+  function graphReferencePoint(point, notes, contour = songGuideContour()) {
     if (!point || Number(point.confidence ?? 1) < REFERENCE_CONTOUR_MIN_CONFIDENCE) return null;
     const songTime = Number(point.time ?? point.songTime);
     const midi = Number(point.midi);
     if (!Number.isFinite(songTime) || !Number.isFinite(midi)) return null;
-    const target = targetNoteAtSongTime(songTime, notes, 0.3);
+    const target = referenceTargetAtSongTime(songTime, notes, contour);
     if (!target || !Number.isFinite(Number(target.midi))) return null;
 
     const targetMidi = Number(target.midi);
-    const maxBandMidi = Math.max(...normalizePitchBands(target.pitchBandsCents)) / 100;
+    const targetNote = targetNoteAtSongTime(songTime, notes, 0.3);
+    const maxBandMidi = Math.max(...normalizePitchBands(targetNote?.pitchBandsCents)) / 100;
     return {
       songTime,
       midi: targetMidi + clamp(midi - targetMidi, -maxBandMidi, maxBandMidi),
@@ -1756,7 +1838,7 @@
 
   function drawReferenceVocalContour(ctx, contour, notes, xForTime, yForMidi, layout) {
     const points = contour
-      .map((point) => graphReferencePoint(point, notes))
+      .map((point) => graphReferencePoint(point, notes, contour))
       .filter(Boolean)
       .sort((a, b) => a.songTime - b.songTime);
     if (points.length < 2) return false;
@@ -1806,7 +1888,7 @@
     return "rgba(207, 77, 67, 0.98)";
   }
 
-  function drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes) {
+  function drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour) {
     const points = state.history
       .filter(
         (point) =>
@@ -1815,7 +1897,7 @@
           point.songTime >= minTime &&
           point.songTime <= maxTime
       )
-      .map((point) => graphPitchPoint(point, notes))
+      .map((point) => graphPitchPoint(point, notes, contour))
       .filter(Boolean)
       .sort((a, b) => a.songTime - b.songTime);
     if (points.length === 0) return;
@@ -1923,10 +2005,10 @@
     ctx.stroke();
     ctx.lineWidth = 1;
 
-    drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes);
+    drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour);
 
     if (Number.isFinite(pitchMidi)) {
-      const livePoint = graphPitchPoint({ songTime, midi: pitchMidi, confidence: 1 }, notes);
+      const livePoint = graphPitchPoint({ songTime, midi: pitchMidi, confidence: 1 }, notes, contour);
       if (livePoint) {
         const y = clampRoadY(yForMidi(livePoint.midi), layout);
         ctx.fillStyle = trailColorForCents(livePoint.cents);

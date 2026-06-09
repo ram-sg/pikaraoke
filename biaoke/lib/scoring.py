@@ -21,6 +21,11 @@ MIN_SINGING_FREQUENCY = 70
 MAX_SINGING_FREQUENCY = 700
 DEFAULT_MAX_MELODY_SECONDS = 360
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+MELODY_MIN_MIDI = 36
+MELODY_MAX_MIDI = 84
+MELODY_CONTOUR_MIN_CONFIDENCE = 0.38
+MELODY_CONTOUR_MIN_GAP_SECONDS = 0.09
+MELODY_CONTOUR_SMOOTH_WINDOW_SECONDS = 0.16
 
 
 class ScoreAnalysisError(Exception):
@@ -141,15 +146,18 @@ def extract_melody_guide_from_media(
         limited = True
 
     if prefer_torchcrepe:
+        pitch_model = _melody_pitch_model()
         try:
-            frames = _extract_pitch_torchcrepe(samples, sample_rate)
+            frames = _extract_pitch_torchcrepe(samples, sample_rate, model=pitch_model)
             engine = str(get_scoring_engine_status()["engine"])
         except Exception:
             frames = _extract_pitch_autocorrelation(samples, sample_rate)
             engine = "autocorrelation"
+            pitch_model = None
     else:
         frames = _extract_pitch_autocorrelation(samples, sample_rate)
         engine = "autocorrelation"
+        pitch_model = None
 
     notes = _pitch_frames_to_melody_notes(frames)
     contour = _pitch_frames_to_melody_contour(frames)
@@ -157,6 +165,7 @@ def extract_melody_guide_from_media(
     return {
         "status": "ready",
         "engine": engine,
+        "pitch_model": pitch_model,
         "duration_seconds": round(original_duration, 2),
         "analysis_duration_seconds": round(len(samples) / sample_rate, 2),
         "limited": limited,
@@ -194,6 +203,11 @@ def _max_melody_seconds() -> int:
         return max(30, min(600, int(raw_value)))
     except (TypeError, ValueError):
         return DEFAULT_MAX_MELODY_SECONDS
+
+
+def _melody_pitch_model() -> str:
+    model = os.environ.get("BIAOKE_COACH_CREPE_MODEL", "full").strip().casefold()
+    return model if model in {"tiny", "full"} else "full"
 
 
 def _limit_samples_for_fast_analysis(samples: list[float], sample_rate: int) -> list[float]:
@@ -272,10 +286,13 @@ def _pcm_bytes_to_float(chunk: bytes, sample_width: int) -> float:
     return max(-1.0, min(1.0, value / max_value))
 
 
-def _extract_pitch_torchcrepe(samples: list[float], sample_rate: int) -> list[PitchFrame]:
+def _extract_pitch_torchcrepe(
+    samples: list[float], sample_rate: int, *, model: str = "tiny"
+) -> list[PitchFrame]:
     import torch  # type: ignore
     import torchcrepe  # type: ignore
 
+    model = model if model in {"tiny", "full"} else "tiny"
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     audio = torch.tensor(samples, dtype=torch.float32, device=device).unsqueeze(0)
     hop_length = max(1, int(sample_rate * HOP_SECONDS))
@@ -285,7 +302,7 @@ def _extract_pitch_torchcrepe(samples: list[float], sample_rate: int) -> list[Pi
         hop_length,
         MIN_SINGING_FREQUENCY,
         MAX_SINGING_FREQUENCY,
-        "tiny",
+        model,
         batch_size=2048,
         device=device,
         return_periodicity=True,
@@ -461,6 +478,7 @@ def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, fl
     start_time = 0.0
     previous_time = 0.0
     confidences: list[float] = []
+    timeline = _pitch_frames_to_smoothed_midi_timeline(frames)
 
     def finish_segment(end_time: float) -> None:
         nonlocal active_note, start_time, confidences
@@ -482,27 +500,26 @@ def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, fl
         active_note = None
         confidences = []
 
-    for frame in frames:
+    for point in timeline:
         note = None
-        if frame.pitch_hz and frame.pitch_hz > 0 and frame.confidence >= 0.38:
-            midi_float = 69.0 + 12.0 * math.log2(frame.pitch_hz / 440.0)
-            if 36 <= midi_float <= 84:
-                note = int(round(midi_float))
+        midi_float = point["midi"]
+        if midi_float is not None:
+            note = int(round(midi_float))
 
         if note is None:
             finish_segment(previous_time + HOP_SECONDS)
         elif active_note is None:
             active_note = note
-            start_time = frame.time
-            confidences = [frame.confidence]
+            start_time = float(point["time"])
+            confidences = [float(point["confidence"])]
         elif note == int(active_note):
-            confidences.append(frame.confidence)
+            confidences.append(float(point["confidence"]))
         else:
             finish_segment(previous_time + HOP_SECONDS)
             active_note = note
-            start_time = frame.time
-            confidences = [frame.confidence]
-        previous_time = frame.time
+            start_time = float(point["time"])
+            confidences = [float(point["confidence"])]
+        previous_time = float(point["time"])
 
     finish_segment(previous_time + HOP_SECONDS)
 
@@ -529,27 +546,87 @@ def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, fl
 def _pitch_frames_to_melody_contour(frames: list[PitchFrame]) -> list[dict[str, float]]:
     points: list[dict[str, float]] = []
     previous_time = -1.0
-    min_gap_seconds = 0.09
+    timeline = _pitch_frames_to_smoothed_midi_timeline(frames)
 
-    for frame in frames:
-        if not frame.pitch_hz or frame.pitch_hz <= 0 or frame.confidence < 0.38:
+    for point in timeline:
+        midi = point["midi"]
+        time = float(point["time"])
+        if midi is None:
             continue
-        if frame.time - previous_time < min_gap_seconds:
+        if time - previous_time < MELODY_CONTOUR_MIN_GAP_SECONDS:
             continue
 
-        midi = 69.0 + 12.0 * math.log2(frame.pitch_hz / 440.0)
-        if 36 <= midi <= 84:
-            points.append(
-                {
-                    "time": round(frame.time, 3),
-                    "midi": round(midi, 3),
-                    "frequency": round(frame.pitch_hz, 2),
-                    "confidence": round(frame.confidence, 4),
-                }
-            )
-            previous_time = frame.time
+        points.append(
+            {
+                "time": round(time, 3),
+                "midi": round(midi, 3),
+                "frequency": round(midi_to_frequency(midi), 2),
+                "confidence": round(float(point["confidence"]), 4),
+            }
+        )
+        previous_time = time
 
     return points
+
+
+def _pitch_frames_to_smoothed_midi_timeline(
+    frames: list[PitchFrame],
+) -> list[dict[str, float | None]]:
+    raw_points = [
+        {
+            "time": frame.time,
+            "midi": _pitch_frame_midi(frame),
+            "confidence": frame.confidence,
+        }
+        for frame in frames
+    ]
+    smoothed: list[dict[str, float | None]] = []
+
+    for point in raw_points:
+        midi = point["midi"]
+        if midi is None:
+            smoothed.append(point)
+            continue
+
+        neighbor_points = [
+            neighbor
+            for neighbor in raw_points
+            if neighbor["midi"] is not None
+            and abs(float(neighbor["time"]) - float(point["time"]))
+            <= MELODY_CONTOUR_SMOOTH_WINDOW_SECONDS
+        ]
+        reference_midi = midi
+        if len(neighbor_points) >= 3:
+            median_midi = statistics.median(float(neighbor["midi"]) for neighbor in neighbor_points)
+            if abs(median_midi - midi) > 3.0:
+                reference_midi = median_midi
+
+        values = []
+        weights = []
+        for neighbor in neighbor_points:
+            neighbor_midi = neighbor["midi"]
+            if neighbor_midi is None or abs(neighbor_midi - reference_midi) > 3.0:
+                continue
+            weight = max(0.05, float(neighbor["confidence"]))
+            values.append(neighbor_midi * weight)
+            weights.append(weight)
+
+        if len(weights) >= 2:
+            point = {**point, "midi": sum(values) / sum(weights)}
+        else:
+            point = {**point, "midi": None}
+        smoothed.append(point)
+
+    return smoothed
+
+
+def _pitch_frame_midi(frame: PitchFrame) -> float | None:
+    if not frame.pitch_hz or frame.pitch_hz <= 0 or frame.confidence < MELODY_CONTOUR_MIN_CONFIDENCE:
+        return None
+    midi = 69.0 + 12.0 * math.log2(frame.pitch_hz / 440.0)
+    if MELODY_MIN_MIDI <= midi <= MELODY_MAX_MIDI:
+        return midi
+    return None
 
 
 def _pitch_range_cents(pitch_values: list[float]) -> float:
