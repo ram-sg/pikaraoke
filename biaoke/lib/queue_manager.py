@@ -100,9 +100,10 @@ class QueueManager:
         semitones: int = 0,
         add_to_front: bool = False,
         log_action: bool = True,
+        title: str | None = None,
     ) -> list[bool | str]:
         """Add a song to the queue. Returns [success, message]."""
-        title = self._resolve_title(song_path)
+        title = title or self._resolve_title(song_path)
 
         if self.is_song_in_queue(song_path):
             logging.warning("Song is already in queue, will not add: " + song_path)

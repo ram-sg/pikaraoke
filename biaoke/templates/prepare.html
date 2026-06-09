@@ -1,0 +1,254 @@
+{% extends 'base.html' %} {% block scripts %}
+<style>
+  .prepare-shell {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .prepare-panel {
+    background: #141719;
+    border: 1px solid #2c3338;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .prepare-result {
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #2c3338;
+  }
+
+  .prepare-result:last-child {
+    border-bottom: 0;
+  }
+
+  .prepare-thumb {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    background: #07090a;
+  }
+
+  .prepare-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .prepare-track {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #2c3338;
+  }
+
+  .prepare-track:last-child {
+    border-bottom: 0;
+  }
+
+  .prepare-track-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .prepare-status {
+    white-space: nowrap;
+  }
+
+  @media screen and (max-width: 680px) {
+    .prepare-result {
+      grid-template-columns: 1fr;
+    }
+
+    .prepare-track-header {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+</style>
+<script>
+  $(function () {
+    $("#prepare-search-button").on("click", function (event) {
+      event.preventDefault();
+      var query = ($("#prepare-search-input").val() || "").trim();
+      if (!query) return;
+      $("#prepare-search-hidden").val(query);
+      $("#prepare-search-form").submit();
+    });
+
+    $(".prepare-youtube-button").on("click", function () {
+      var button = $(this);
+      var originalText = button.text();
+      button.addClass("is-loading").attr("disabled", true);
+      $.ajax({
+        url: "{{ url_for('prepare.prepare_youtube') }}",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          song_url: button.data("url"),
+          song_title: button.data("title") || "",
+          song_added_by: getUserCookie() || "",
+        }),
+        success: function () {
+          button.removeClass("is-loading").addClass("is-success").text("Preparando");
+          setTimeout(function () {
+            window.location.href = "{{ url_for('prepare.prepare') }}";
+          }, 700);
+        },
+        error: function () {
+          button.removeClass("is-loading").addClass("is-danger").text("Erro");
+          setTimeout(function () {
+            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
+          }, 2000);
+        },
+      });
+    });
+
+    $(".queue-coach-button").on("click", function () {
+      var button = $(this);
+      var originalText = button.text();
+      button.addClass("is-loading").attr("disabled", true);
+      $.ajax({
+        url: "{{ url_for('prepare.enqueue_prepared_track') }}",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          track_id: Number(button.data("track-id")),
+          song_added_by: getUserCookie() || "",
+        }),
+        success: function (data) {
+          button.removeClass("is-loading").addClass("is-success").text("Na fila");
+          showNotification(data.message || "Musica adicionada a fila", "is-success");
+          setTimeout(function () {
+            button.removeClass("is-success").removeAttr("disabled").text(originalText);
+          }, 2500);
+        },
+        error: function (xhr) {
+          var data = xhr.responseJSON || {};
+          button.removeClass("is-loading").addClass("is-danger").text("Erro");
+          showNotification(data.message || "Nao foi possivel adicionar", "is-danger");
+          setTimeout(function () {
+            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
+          }, 2500);
+        },
+      });
+    });
+
+    var hasActivePreparation = {{ 'true' if has_active_preparation else 'false' }};
+    if (hasActivePreparation) {
+      setTimeout(function () {
+        window.location.reload();
+      }, 5000);
+    }
+  });
+</script>
+{% endblock %} {% block header %}
+<h1>{% block title %}Preparar Coach{% endblock %}</h1>
+{% endblock %} {% block content %}
+<div class="prepare-shell">
+  <section class="prepare-panel">
+    <h2 class="title is-5">Buscar versao original</h2>
+    <p class="has-text-grey-light mb-3">
+      Use esta tela para baixar/importar a musica e criar o pacote do Coach. Ela nao entra na fila
+      enquanto nao estiver preparada.
+    </p>
+    <div class="field has-addons">
+      <div class="control is-expanded">
+        <input
+          id="prepare-search-input"
+          class="input"
+          type="text"
+          value="{{ search_string or '' }}"
+          placeholder="Artista - musica"
+        />
+      </div>
+      <div class="control">
+        <button id="prepare-search-button" class="button is-warning">Buscar</button>
+      </div>
+    </div>
+    <form id="prepare-search-form" action="{{ url_for('prepare.prepare') }}" method="get" hidden>
+      <input id="prepare-search-hidden" name="search_string" />
+    </form>
+  </section>
+
+  {% if search_results %}
+  <section class="prepare-panel">
+    <h2 class="title is-5">Resultados para "{{ search_string }}"</h2>
+    {% for title,url,id,channel,duration in search_results %}
+    <div class="prepare-result">
+      <div class="prepare-thumb">
+        <img src="https://img.youtube.com/vi/{{ id }}/mqdefault.jpg" alt="" />
+      </div>
+      <div>
+        <strong>{{ title }}</strong>
+        {% if channel %}<div class="is-size-7 has-text-grey">{{ channel }}</div>{% endif %}
+        {% if duration %}<div class="is-size-7 has-text-grey">Duracao: {{ duration }}</div>{% endif %}
+        <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="is-size-7 has-text-info">
+          YouTube
+        </a>
+      </div>
+      <button
+        class="button is-primary prepare-youtube-button"
+        data-url="{{ url }}"
+        data-title="{{ title }}"
+      >
+        Preparar
+      </button>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="prepare-panel">
+    <h2 class="title is-5">Catalogo Coach</h2>
+    {% if tracks %}
+      {% for track in tracks %}
+      {% set latest = track.latest_job %}
+      <div class="prepare-track">
+        <div class="prepare-track-header">
+          <div>
+            <strong>{{ track.display_title }}</strong>
+            <div class="is-size-7 has-text-grey">
+              {{ track.source_type }}{% if track.file_path %} · {{ track.file_path }}{% endif %}
+            </div>
+          </div>
+          <span class="tag prepare-status {% if track.status == 'ready' %}is-success{% elif track.status == 'failed' %}is-danger{% elif track.status == 'processing' %}is-warning{% else %}is-info{% endif %}">
+            {{ track.status }}
+          </span>
+        </div>
+        {% if latest %}
+        <div class="is-size-7 has-text-grey-light">
+          Etapa: {{ latest.stage }} · {{ latest.status }} · {{ "%.0f"|format(latest.progress or 0) }}%
+          {% if latest.error %} · {{ latest.error }}{% endif %}
+        </div>
+        {% endif %}
+        {% if track.status == 'ready' and track.assets and track.assets.guide_path and (track.assets.instrumental_audio_path or track.assets.original_audio_path) %}
+        <div>
+          <button class="button is-small is-primary queue-coach-button" data-track-id="{{ track.id }}">
+            Cantar no Coach
+          </button>
+          {% if track.assets.instrumental_audio_path %}
+          <span class="tag is-success is-light">instrumental pronto</span>
+          {% else %}
+          <span class="tag is-warning is-light">sem instrumental</span>
+          {% endif %}
+        </div>
+        {% elif track.status == 'needs_review' %}
+        <div>
+          <span class="tag is-warning is-light">precisa revisão</span>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="has-text-grey-light">Nenhuma musica preparada ainda.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

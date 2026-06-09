@@ -101,6 +101,8 @@ class DownloadManager:
         enqueue: bool = False,
         user: str = "Biaoke",
         title: str | None = None,
+        context: dict | None = None,
+        download_subtitles: bool = True,
     ) -> None:
         """Queue a video for download.
 
@@ -111,6 +113,8 @@ class DownloadManager:
             enqueue: Whether to add to playback queue after download.
             user: Username to attribute the download to.
             title: Display title (defaults to URL if not provided).
+            context: Optional opaque caller context emitted with download lifecycle events.
+            download_subtitles: Whether yt-dlp should fetch sidecar subtitles.
         """
         from flask_babel import _
 
@@ -143,6 +147,8 @@ class DownloadManager:
             "user": user,
             "title": title,
             "display_title": displayed_title,
+            "context": context,
+            "download_subtitles": download_subtitles,
         }
 
         # Add to the download queue and shadow list
@@ -184,6 +190,8 @@ class DownloadManager:
                     download_request["enqueue"],
                     download_request["user"],
                     download_request["title"],
+                    download_request.get("context"),
+                    download_request.get("download_subtitles", True),
                 )
             except Exception as e:
                 logging.error(f"Error processing download: {e}")
@@ -202,6 +210,8 @@ class DownloadManager:
         enqueue: bool,
         user: str,
         title: str | None,
+        context: dict | None = None,
+        download_subtitles: bool = True,
     ) -> int:
         """Execute a video download.
 
@@ -210,6 +220,8 @@ class DownloadManager:
             enqueue: Whether to add to queue after download.
             user: Username to attribute the download to.
             title: Display title (defaults to URL if not provided).
+            context: Optional opaque caller context emitted with download lifecycle events.
+            download_subtitles: Whether yt-dlp should fetch sidecar subtitles.
 
         Returns:
             Return code from the download process (0 = success).
@@ -220,6 +232,7 @@ class DownloadManager:
 
         # MSG: Message shown when download actually starts (after waiting in queue)
         self._events.emit("notification", _("Downloading video: %s") % displayed_title)
+        self._events.emit("download_item_started", context)
 
         cmd = build_ytdl_download_command(
             video_url,
@@ -227,6 +240,7 @@ class DownloadManager:
             self._preferences.get_or_default("high_quality"),
             self._youtubedl_proxy,
             self._additional_ytdl_args,
+            download_subtitles=download_subtitles,
         )
         logging.debug("yt-dlp command: " + " ".join(cmd))
 
@@ -289,6 +303,7 @@ class DownloadManager:
                     "error": output or "Unknown error",
                 }
             )
+            self._events.emit("download_item_failed", context, output or "Unknown error")
         else:
             if self.active_download:
                 self.active_download["progress"] = 100
@@ -317,6 +332,7 @@ class DownloadManager:
                 logging.warning(
                     f"Could not find downloaded song in {self._download_path} matching ID: {video_id}"
                 )
+            self._events.emit("download_item_completed", song_path, context, video_url, title)
 
             if enqueue:
                 if song_path:

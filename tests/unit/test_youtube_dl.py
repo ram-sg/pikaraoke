@@ -45,6 +45,16 @@ class TestGetYoutubeIdFromUrl:
         url = "https://youtu.be/dQw4w9WgXcQ?t=30"
         assert get_youtube_id_from_url(url) == "dQw4w9WgXcQ"
 
+    def test_music_youtube_url(self):
+        """Test parsing YouTube Music watch URL."""
+        url = "https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=RDAMVM"
+        assert get_youtube_id_from_url(url) == "dQw4w9WgXcQ"
+
+    def test_watch_url_with_v_after_other_query_params(self):
+        """Test parsing watch URL when v is not the first query parameter."""
+        url = "https://www.youtube.com/watch?si=abc&v=dQw4w9WgXcQ"
+        assert get_youtube_id_from_url(url) == "dQw4w9WgXcQ"
+
     def test_invalid_url_returns_none(self):
         """Test that invalid URL returns None."""
         url = "https://example.com/video"
@@ -90,14 +100,16 @@ class TestBuildYtdlDownloadCommand:
 
     @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_standard_quality_format(self, mock_js):
-        """Test that standard quality uses mp4 format."""
+        """Test that standard quality uses an explicit mp4-compatible selector."""
         cmd = build_ytdl_download_command(
             video_url="https://www.youtube.com/watch?v=test123",
             download_path="/songs",
             high_quality=False,
         )
         format_idx = cmd.index("-f") + 1
-        assert cmd[format_idx] == "mp4"
+        assert cmd[format_idx] != "mp4"
+        assert "avc1" in cmd[format_idx]
+        assert "mp4" in cmd[format_idx]
 
     @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_with_proxy(self, mock_js):
@@ -176,9 +188,25 @@ class TestBuildYtdlDownloadCommand:
         assert "--write-subs" in cmd
         assert "--write-auto-subs" in cmd
         assert "--sub-langs" in cmd
-        assert "pt.*,pt,en.*,en,es.*,es" in cmd
+        assert "pt-BR,pt,en,es" in cmd
         assert "--convert-subs" in cmd
         assert cmd[cmd.index("--convert-subs") + 1] == "ass"
+
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    def test_can_disable_sidecar_subtitles(self, mock_js):
+        """Coach preparation can skip YouTube subtitles to avoid subtitle rate limits."""
+        cmd = build_ytdl_download_command(
+            video_url="https://www.youtube.com/watch?v=test123",
+            download_path="/songs",
+            download_subtitles=False,
+        )
+
+        assert "--write-subs" not in cmd
+        assert "--write-auto-subs" not in cmd
+        assert "--sub-langs" not in cmd
+        assert "--convert-subs" not in cmd
+        assert "--no-write-subs" in cmd
+        assert "--no-write-auto-subs" in cmd
 
     @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_url_is_last_argument(self, mock_js):

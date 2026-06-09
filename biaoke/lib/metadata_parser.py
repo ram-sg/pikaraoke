@@ -171,6 +171,7 @@ TRAILING_NOISE_PATTERNS = [
     re.compile(
         r"\s*(?:"
         r"official\s+(?:music\s+)?video|lyrics?|hd|hq"
+        r"|clipe\s+oficial|v[ií]deo\s+oficial"
         r"|with\s+lyrics|no\s+lead\s+vocal|cc"  # English
         r"|翻唱|現場|现场|高清|歌詞|歌词|MV|原版"  # Chinese
         r"|歌ってみた|カバー"  # Japanese

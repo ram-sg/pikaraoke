@@ -34,6 +34,8 @@
     loadingLyrics: "Carregando letra",
     lyricsReady: "Letra sincronizada",
     lyricsError: "Erro ao carregar letra",
+    lyricsMismatch: "Letra de outra versão",
+    melodyShort: "Melodia incompleta",
   };
 
   const RANGE_OFFSETS = {
@@ -299,6 +301,15 @@
   }
 
   function songPlaybackTime(now) {
+    const video = getVideoPlayer();
+    if (
+      state.currentVideoUrl &&
+      video &&
+      Number.isFinite(video.currentTime) &&
+      (video.currentTime > 0 || !video.paused)
+    ) {
+      return Math.max(0, video.currentTime);
+    }
     if (!state.songSync) return 0;
     if (state.songSync.paused) return state.songSync.position;
     return Math.max(0, state.songSync.position + (now - state.songSync.receivedAt) / 1000);
@@ -701,9 +712,16 @@
       const guide = await readJsonResponse(response);
       state.lyricsOffsetSeconds = Number(guide.lyrics_offset_seconds || 0);
       setLyricsOffsetDisplay();
+      const qualityMessages = Array.isArray(guide.quality_messages) ? guide.quality_messages : [];
       if (guide.status === "idle" && state.nowPlaying.now_playing) {
         state.currentLyricsKey = null;
         setLyricsStatus(TEXT.loadingLyrics, "is-warning");
+        return true;
+      }
+      if (qualityMessages.includes("lyrics_duration_mismatch")) {
+        state.lyrics = [];
+        state.activeLyricIndex = -1;
+        setLyricsStatus(TEXT.lyricsMismatch, "is-danger");
         return true;
       }
       if (guide.status !== "ready" || !Array.isArray(guide.lines) || guide.lines.length === 0) {
@@ -725,13 +743,30 @@
   function updateLyrics(time) {
     if (!state.lyrics.length) return;
     const lyricTime = time - Number(state.lyricsOffsetSeconds || 0);
+    const firstLine = state.lyrics[0];
+    const lastLine = state.lyrics[state.lyrics.length - 1];
     let activeIndex = state.lyrics.findIndex((line) => lyricTime >= line.start && lyricTime <= line.end);
     if (activeIndex < 0) {
+      if (firstLine && lyricTime < firstLine.start) {
+        setLyricsStatus(TEXT.lyricsReady, "is-ready");
+        renderLyricLine(els["coach-lyrics-current"], firstLine, firstLine.start);
+        els["coach-lyrics-next"].textContent = state.lyrics[1]?.text || "";
+        state.activeLyricIndex = 0;
+        return;
+      }
+      if (lastLine && lyricTime > lastLine.end) {
+        setLyricsStatus(TEXT.lyricsReady, "is-ready");
+        renderLyricLine(els["coach-lyrics-current"], lastLine, lastLine.end);
+        els["coach-lyrics-next"].textContent = "";
+        state.activeLyricIndex = state.lyrics.length - 1;
+        return;
+      }
       activeIndex = state.lyrics.findIndex((line) => line.start > lyricTime);
       if (activeIndex >= 0) {
         setLyricsStatus(TEXT.lyricsReady, "is-ready");
         renderLyricLine(els["coach-lyrics-current"], state.lyrics[activeIndex], state.lyrics[activeIndex].start);
         els["coach-lyrics-next"].textContent = state.lyrics[activeIndex + 1]?.text || "";
+        state.activeLyricIndex = activeIndex;
       }
       return;
     }
@@ -949,11 +984,17 @@
   function setupPlaybackSocket() {
     state.socket = window.socket || io();
     window.socket = state.socket;
+    const registerCoach = () => {
+      state.socket.emit("register_splash", {
+        client_type: "coach",
+        preferred_role: "master",
+      });
+    };
     state.socket.on("connect", () => {
-      state.socket.emit("register_splash");
+      registerCoach();
     });
     if (state.socket.connected) {
-      state.socket.emit("register_splash");
+      registerCoach();
     }
     state.socket.on("splash_role", (role) => {
       state.isMaster = role === "master";
@@ -1046,7 +1087,12 @@
         paused: Boolean(guide.is_paused),
         receivedAt: performance.now(),
       };
-      setStatus(TEXT.guideReady, "is-hot");
+      const qualityMessages = Array.isArray(guide.quality_messages) ? guide.quality_messages : [];
+      if (qualityMessages.includes("melody_ends_before_lyrics")) {
+        setStatus(TEXT.melodyShort, "is-warning");
+      } else {
+        setStatus(TEXT.guideReady, "is-hot");
+      }
       return guide;
     } catch (error) {
       console.log("Could not load song melody guide", error);

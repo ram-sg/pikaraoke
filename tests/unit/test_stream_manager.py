@@ -429,6 +429,29 @@ class TestStreamManagerTranscodeFile:
 
         mock_kill.assert_called_once()
 
+    @patch("biaoke.lib.stream_manager.time")
+    @patch("biaoke.lib.stream_manager.Thread")
+    @patch("biaoke.lib.stream_manager.build_ffmpeg_cmd")
+    def test_force_complete_skips_early_buffer_playback(
+        self, mock_build_cmd, mock_thread, mock_time, test_prefs
+    ):
+        """Test forced complete transcodes do not return on partial MP4 buffers."""
+        sm = StreamManager(test_prefs)
+        mock_cmd, mock_process = self._make_mock_ffmpeg(mock_build_cmd, poll_return=None)
+        mock_process.poll.side_effect = [None, 0, 0]
+
+        with patch.object(sm, "_check_mp4_buffer", return_value=True) as mock_buffer:
+            is_complete, is_buffered = sm._transcode_file(
+                self._make_mock_fr(), semitones=0, is_hls=False, force_complete=True
+            )
+
+        mock_buffer.assert_not_called()
+        assert is_complete is True
+        assert is_buffered is False
+        mock_build_cmd.assert_called_once()
+        assert mock_build_cmd.call_args.args[4] is True
+        mock_cmd.run_async.assert_called_once_with(pipe_stderr=True, pipe_stdin=True)
+
 
 class TestStreamManagerPlayFile:
     """Tests for StreamManager.play_file method."""
@@ -493,6 +516,25 @@ class TestStreamManagerPlayFile:
 
         assert result.success is True
         assert result.stream_url == "/stream/12345.m3u8"
+
+    @patch("flask_babel._", side_effect=lambda x: x)
+    @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=True)
+    @patch("biaoke.lib.stream_manager.FileResolver")
+    def test_play_file_audio_only_hls_fully_buffers_mp4(
+        self, mock_resolver_class, mock_transcode_check, mock_gettext, test_prefs
+    ):
+        """Audio-only stems should avoid realtime HLS and play as complete MP4."""
+        sm = StreamManager(test_prefs, streaming_format="hls")
+        self._setup_resolver(mock_resolver_class, output_ext="mp4")
+
+        with patch.object(sm, "_transcode_file", return_value=(True, False)) as mock_transcode:
+            result = sm.play_file("/songs/stem.wav")
+
+        mock_resolver_class.assert_called_once_with("/songs/stem.wav", "mp4")
+        assert mock_transcode.call_args.args[2] is False
+        assert mock_transcode.call_args.kwargs["force_complete"] is True
+        assert result.success is True
+        assert result.stream_url == "/stream/full/12345"
 
     @patch("flask_babel._", side_effect=lambda x: x)
     @patch("biaoke.lib.stream_manager.is_transcoding_required", return_value=True)

@@ -1,0 +1,87 @@
+import json
+from unittest.mock import MagicMock, patch
+
+import werkzeug
+from flask import Flask
+
+if not hasattr(werkzeug, "__version__"):
+    werkzeug.__version__ = "3.0.0"
+
+from biaoke.routes.prepare import prepare_bp
+
+
+def test_prepare_youtube_route_queues_job():
+    app = Flask(__name__)
+    app.register_blueprint(prepare_bp)
+    client = app.test_client()
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.coach_preparation.prepare_youtube.return_value = {
+        "track": {"id": 1},
+        "job": {"id": 2},
+    }
+
+    with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
+        response = client.post(
+            "/prepare/youtube",
+            json={
+                "song_url": "https://youtube.com/watch?v=abc12345678",
+                "song_title": "Artist - Song",
+                "song_added_by": "Ramon",
+            },
+        )
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data["status"] == "ok"
+    mock_karaoke.coach_preparation.prepare_youtube.assert_called_once_with(
+        url="https://youtube.com/watch?v=abc12345678",
+        title="Artist - Song",
+        user="Ramon",
+    )
+
+
+def test_prepare_status_route_lists_tracks():
+    app = Flask(__name__)
+    app.register_blueprint(prepare_bp)
+    client = app.test_client()
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.coach_preparation.list_tracks.return_value = [{"id": 1, "status": "queued"}]
+
+    with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
+        response = client.get("/prepare/status")
+
+    assert response.status_code == 200
+    assert json.loads(response.data)["tracks"] == [{"id": 1, "status": "queued"}]
+
+
+def test_prepare_enqueue_route_queues_playable_coach_asset():
+    app = Flask(__name__)
+    app.register_blueprint(prepare_bp)
+    client = app.test_client()
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.coach_preparation.get_playable_track_asset.return_value = {
+        "path": "/songs/.biaoke-stems/song.instrumental.wav",
+        "title": "Artist - Song",
+        "using_instrumental": True,
+    }
+    mock_karaoke.queue_manager.enqueue.return_value = [True, "ok"]
+
+    with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
+        response = client.post(
+            "/prepare/enqueue",
+            json={"track_id": 7, "song_added_by": "Ramon"},
+        )
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data["status"] == "ok"
+    assert data["using_instrumental"] is True
+    mock_karaoke.coach_preparation.get_playable_track_asset.assert_called_once_with(7)
+    mock_karaoke.queue_manager.enqueue.assert_called_once_with(
+        "/songs/.biaoke-stems/song.instrumental.wav",
+        "Ramon",
+        title="Artist - Song",
+    )

@@ -6,7 +6,7 @@ _stdlib_subprocess_run = _stdlib_subprocess.run
 
 from gevent import monkey, spawn
 
-monkey.patch_all()
+monkey.patch_all(ssl=False)
 
 import logging
 import os
@@ -45,6 +45,7 @@ from biaoke.routes.info import info_bp
 from biaoke.routes.metadata_api import metadata_bp
 from biaoke.routes.now_playing import nowplaying_bp
 from biaoke.routes.preferences import preferences_bp
+from biaoke.routes.prepare import prepare_bp
 from biaoke.routes.queue import queue_bp
 from biaoke.routes.search import search_bp
 from biaoke.routes.score import score_bp
@@ -95,6 +96,7 @@ _api_blueprints = [
     search_bp,
     files_bp,
     preferences_bp,
+    prepare_bp,
     admin_bp,
     controller_bp,
     background_music_bp,

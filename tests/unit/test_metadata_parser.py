@@ -582,6 +582,12 @@ class TestRegexTidy:
     def test_strips_leading_official_music_video(self):
         assert regex_tidy("Official Music Video - Artist - Song") == "Artist - Song"
 
+    def test_strips_trailing_portuguese_official_clip(self):
+        assert regex_tidy("Eduardo e Mônica - CLIPE OFICIAL (HD)") == "Eduardo e Mônica"
+
+    def test_strips_trailing_portuguese_official_video(self):
+        assert regex_tidy("Artist - Song - vídeo oficial") == "Artist - Song"
+
     def test_no_change_when_clean(self):
         assert regex_tidy("Artist - Song Title") == "Artist - Song Title"
 

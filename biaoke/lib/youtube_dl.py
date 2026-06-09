@@ -6,11 +6,12 @@ import os
 import shlex
 import subprocess
 import sys
+from urllib.parse import parse_qs, urlparse
 
 from biaoke.lib.get_platform import get_installed_js_runtime
 
 yt_dlp_cmd = [sys.executable, "-m", "yt_dlp"]
-_DEFAULT_SUBTITLE_LANGS = "pt.*,pt,en.*,en,es.*,es"
+_DEFAULT_SUBTITLE_LANGS = "pt-BR,pt,en,es"
 
 
 def _js_runtime_args() -> list[str]:
@@ -56,17 +57,20 @@ def get_youtube_id_from_url(url: str) -> str | None:
     Returns:
         The video ID string, or None if parsing failed.
     """
-    if "v=" in url:  # accommodates youtube.com/watch?v= and m.youtube.com/?v=
-        s = url.split("watch?v=")
-    else:  # accommodates youtu.be/
-        s = url.split("u.be/")
-    if len(s) == 2:
-        if "?" in s[1]:  # Strip unneeded YouTube params
-            s[1] = s[1][0 : s[1].index("?")]
-        return s[1]
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host.endswith("youtu.be"):
+        video_id = parsed.path.strip("/").split("/")[0]
     else:
-        logging.error(f"Error parsing youtube id from url: {url}")
-        return None
+        query = parse_qs(parsed.query)
+        video_id = query.get("v", [""])[0]
+
+    video_id = video_id.split("?")[0].split("&")[0].strip()
+    if video_id:
+        return video_id
+
+    logging.error(f"Error parsing youtube id from url: {url}")
+    return None
 
 
 def upgrade_youtubedl() -> str:
@@ -123,6 +127,7 @@ def build_ytdl_download_command(
     high_quality: bool = False,
     youtubedl_proxy: str | None = None,
     additional_args: str | None = None,
+    download_subtitles: bool = True,
 ) -> list[str]:
     """Build the yt-dlp command line for downloading a video.
 
@@ -132,6 +137,7 @@ def build_ytdl_download_command(
         high_quality: If True, download up to 1080p; otherwise download mp4.
         youtubedl_proxy: Optional proxy server URL.
         additional_args: Optional additional command-line arguments as a string.
+        download_subtitles: If True, request a small set of sidecar subtitles.
 
     Returns:
         List of command-line arguments for subprocess execution.
@@ -140,7 +146,7 @@ def build_ytdl_download_command(
     file_quality = (
         "bestvideo[ext!=webm][height<=1080]+bestaudio[ext!=webm]/best[ext!=webm]"
         if high_quality
-        else "mp4"
+        else "bv*[vcodec^=avc1][height<=720]+ba[acodec^=mp4a]/b[ext=mp4]/best[ext=mp4]/best"
     )
     args = [
         "-f",
@@ -149,15 +155,20 @@ def build_ytdl_download_command(
         dl_path,
         "-S",
         "vcodec:h264",
-        "--write-subs",
-        "--write-auto-subs",
-        "--sub-langs",
-        _DEFAULT_SUBTITLE_LANGS,
-        "--convert-subs",
-        "ass",
         "--compat-options",
         "filename-sanitization",
     ]
+    if download_subtitles:
+        args += [
+            "--write-subs",
+            "--write-auto-subs",
+            "--sub-langs",
+            _DEFAULT_SUBTITLE_LANGS,
+            "--convert-subs",
+            "ass",
+        ]
+    else:
+        args += ["--no-write-subs", "--no-write-auto-subs"]
     cmd = yt_dlp_cmd + args + _js_runtime_args()
     if youtubedl_proxy:
         cmd += ["--proxy", youtubedl_proxy]

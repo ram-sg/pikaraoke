@@ -227,3 +227,53 @@ def test_current_melody_guide_returns_transposed_notes(tmp_path):
     assert data["transpose"] == 2
     assert data["notes"][0]["midi"] == 62
     assert data["notes"][0]["note"] == "D4"
+
+
+def test_current_routes_use_prepared_coach_package_for_playing_stem(tmp_path):
+    app = Flask(__name__)
+    app.register_blueprint(score_bp)
+    original_path = tmp_path / "song.mp3"
+    instrumental_path = tmp_path / "song.instrumental.wav"
+    original_path.write_bytes(b"fake original")
+    instrumental_path.write_bytes(b"fake instrumental")
+
+    mock_karaoke = MagicMock()
+    controller = mock_karaoke.playback_controller
+    controller.now_playing_filename = str(instrumental_path)
+    controller.now_playing = "Artist - Song"
+    controller.now_playing_position = 9.25
+    controller.now_playing_transpose = 1
+    controller.is_paused = False
+    mock_karaoke.coach_preparation.load_coach_guide_for_media_path.return_value = {
+        "schema": "biaoke.coach_guide",
+        "track": {"id": 42, "display_title": "Artist - Song"},
+        "assets": {"original_audio_path": str(original_path)},
+        "lyrics": {
+            "status": "ready",
+            "lines": [{"start": 1.0, "end": 3.0, "text": "Primeira linha"}],
+        },
+        "melody": {
+            "status": "ready",
+            "notes": [
+                {"start": 1.0, "end": 2.0, "midi": 60, "note": "C4", "frequency": 261.63}
+            ],
+        },
+        "quality": {"status": "ready", "messages": ["line_timing_only"]},
+    }
+    app.config["KARAOKE_INSTANCE"] = mock_karaoke
+    client = app.test_client()
+
+    lyrics = client.get("/score/lyrics/current").get_json()
+    melody = client.get("/score/melody/current").get_json()
+    package = client.get("/score/guide/current").get_json()
+
+    assert lyrics["status"] == "ready"
+    assert lyrics["coach_track_id"] == 42
+    assert lyrics["quality_messages"] == ["line_timing_only"]
+    assert lyrics["lines"][0]["text"] == "Primeira linha"
+    assert melody["coach_track_id"] == 42
+    assert melody["quality_messages"] == ["line_timing_only"]
+    assert melody["notes"][0]["midi"] == 61
+    assert melody["notes"][0]["note"] == "C#4"
+    assert package["status"] == "ready"
+    assert package["runtime"]["title"] == "Artist - Song"

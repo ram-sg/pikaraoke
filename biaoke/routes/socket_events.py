@@ -41,17 +41,29 @@ def setup_socket_events(socketio):
         k.reset_now_playing_notification()
 
     @socketio.on("register_splash")
-    def register_splash() -> None:
+    def register_splash(payload=None) -> None:
         """Handle splash screen registration and assign master/slave roles."""
         global master_splash_id
+        payload = payload or {}
+        wants_master = payload.get("preferred_role") == "master"
+        client_type = payload.get("client_type") or "splash"
         sid = request.sid
         splash_connections.add(sid)
-        logging.info(f"Splash screen registered: {sid}")
+        logging.info(f"Splash screen registered: {sid} ({client_type})")
 
-        if master_splash_id is None:
+        if wants_master and master_splash_id and master_splash_id != sid:
+            socketio.emit("splash_role", "slave", room=master_splash_id)
+            logging.info(f"Master splash demoted: {master_splash_id}")
+            master_splash_id = sid
+            socketio.emit("splash_role", "master", room=sid)
+            logging.info(f"Master splash assigned by preference: {sid}")
+        elif master_splash_id is None:
             master_splash_id = sid
             socketio.emit("splash_role", "master", room=sid)
             logging.info(f"Master splash screens assigned: {sid}")
+        elif master_splash_id == sid:
+            socketio.emit("splash_role", "master", room=sid)
+            logging.info(f"Master splash screens confirmed: {sid}")
         else:
             socketio.emit("splash_role", "slave", room=sid)
             logging.info(f"Slave splash screens assigned: {sid}")

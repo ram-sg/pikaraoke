@@ -31,6 +31,15 @@ def get_media_duration(file_path: str) -> int | None:
         return None
 
 
+def has_video_stream(file_path: str) -> bool:
+    """Return True when a media file has at least one video stream."""
+    try:
+        probe = ffmpeg.probe(file_path)
+    except Exception:
+        return False
+    return any(stream.get("codec_type") == "video" for stream in probe.get("streams", []))
+
+
 def build_ffmpeg_cmd(
     fr: FileResolver,
     semitones: int = 0,
@@ -67,25 +76,31 @@ def build_ffmpeg_cmd(
     using_hardware_encoder = supports_hardware_h264_encoding()
     default_vcodec = "h264_v4l2m2m" if using_hardware_encoder else "libx264"
 
-    # CDG always needs encoding; MP4 can copy video stream (already H.264 compatible)
-    # WEBM uses VP8/VP9 which must be transcoded to H.264 for fMP4 containers
-    if is_cdg:
+    has_video = is_cdg or has_video_stream(fr.file_path)
+
+    # CDG always needs encoding; MP4 can copy video stream (already H.264 compatible).
+    # WEBM uses VP8/VP9 which must be transcoded to H.264 for fMP4 containers.
+    if not has_video:
+        vcodec = None
+    elif is_cdg:
         vcodec = "libx264"
     else:
         vcodec = "copy" if fr.file_extension == ".mp4" else default_vcodec
 
     # Optimize bitrate: CDG is simple graphics (500k), video files need more
     # Pi 3B+ struggles with 5M in real-time, 2M provides better stability
-    if is_cdg:
+    if not has_video:
+        vbitrate = None
+    elif is_cdg:
         vbitrate = "500k"
     elif using_hardware_encoder:
         vbitrate = "2M"
     else:
         vbitrate = "5M"
 
-    # Copy audio if no processing needed, otherwise re-encode with AAC
-    # CDG always re-encodes audio for compatibility
-    acodec = "aac" if is_cdg or is_transposed or normalize_audio or avsync != 0 else "copy"
+    # Copy audio if no processing needed, otherwise re-encode with AAC.
+    # CDG and audio-only stems always re-encode audio for browser/container compatibility.
+    acodec = "aac" if not has_video or is_cdg or is_transposed or normalize_audio or avsync != 0 else "copy"
 
     # For container formats with VFR or timestamp issues, use genpts
     if fr.file_extension in [".webm", ".avi", ".mov", ".mkv"]:
@@ -108,63 +123,78 @@ def build_ffmpeg_cmd(
     if normalize_audio:
         audio = audio.filter("loudnorm", i=-16, tp=-1.5, lra=11)
 
-    # Video source: CDG input or original video stream
+    # Video source: CDG input, original video stream, or none for audio-only stems.
     if is_cdg:
         logging.info("Playing CDG/MP3 file: " + fr.file_path)
         cdg_input = ffmpeg.input(fr.cdg_file_path, copyts=None)
         video = cdg_input.video.filter("fps", fps=25)
         if cdg_pixel_scaling:
             video = video.filter("scale", -1, 720, flags="neighbor")
-    else:
+    elif has_video:
         video = input.video
+    else:
+        video = None
 
     # Build output based on format
     if force_mp4_encoding:
         movflags = (
             "+faststart" if buffer_fully_before_playback else "frag_keyframe+default_base_moof"
         )
+        output_streams = (audio, video) if video is not None else (audio,)
+        output_kwargs = {
+            "acodec": acodec,
+            "listen": 1,
+            "f": "mp4",
+            "movflags": movflags,
+        }
+        if video is not None:
+            output_kwargs.update(
+                {
+                    "vcodec": vcodec,
+                    "preset": "ultrafast",
+                    "video_bitrate": vbitrate,
+                    **({"pix_fmt": "yuv420p"} if is_cdg else {}),
+                }
+            )
         output = ffmpeg.output(
-            audio,
-            video,
+            *output_streams,
             fr.output_file,
-            vcodec=vcodec,
-            acodec=acodec,
-            preset="ultrafast",
-            listen=1,
-            f="mp4",
-            video_bitrate=vbitrate,
-            movflags=movflags,
-            **({"pix_fmt": "yuv420p"} if is_cdg else {}),
+            **output_kwargs,
         )
     else:
         # HLS format with fMP4 segments
         # Both MP4 and HLS streaming modes use this - difference is in serving:
         # - mp4: Stream concatenates init + segments for progressive playback
         # - hls: Browser requests segments via .m3u8 playlist
+        output_streams = (audio, video) if video is not None else (audio,)
+        output_kwargs = {
+            "acodec": "aac",
+            "audio_bitrate": "192k",
+            "ac": 2,  # Force stereo
+            "ar": 48000,  # Standard sample rate
+            "f": "hls",
+            "hls_time": 3,
+            "hls_list_size": 0,
+            "hls_playlist_type": "event",
+            "hls_segment_type": "fmp4",
+            "hls_fmp4_init_filename": fr.init_filename,
+            "hls_segment_filename": fr.segment_pattern,
+        }
+        if video is not None:
+            output_kwargs.update(
+                {
+                    "vcodec": vcodec,
+                    "preset": "ultrafast",
+                    "video_bitrate": vbitrate,
+                    **({"pix_fmt": "yuv420p"} if is_cdg else {}),
+                    "vsync": "cfr",
+                    "avoid_negative_ts": "make_zero",
+                }
+            )
         output = ffmpeg.output(
-            audio,
-            video,
+            *output_streams,
             fr.output_file,
-            vcodec=vcodec,
-            acodec="aac",
-            audio_bitrate="192k",
-            ac=2,  # Force stereo
-            ar=48000,  # Standard sample rate
-            preset="ultrafast",
-            f="hls",
-            hls_time=3,
-            hls_list_size=0,
-            hls_playlist_type="event",
-            hls_segment_type="fmp4",
-            hls_fmp4_init_filename=fr.init_filename,
-            hls_segment_filename=fr.segment_pattern,
-            video_bitrate=vbitrate,
-            # CDG needs pix_fmt for proper color space
-            **({"pix_fmt": "yuv420p"} if is_cdg else {}),
-            **{
-                "vsync": "cfr",
-                "avoid_negative_ts": "make_zero",
-            },
+            **output_kwargs,
         )
 
     args = output.get_args()

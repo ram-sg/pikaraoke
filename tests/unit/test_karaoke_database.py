@@ -28,7 +28,7 @@ class TestInit:
 
     def test_user_version(self, db):
         ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 1
+        assert ver == 2
 
     def test_songs_table_exists(self, db):
         tables = {
@@ -148,6 +148,129 @@ class TestMetadata:
             ).fetchall()
         }
         assert "metadata" in tables
+
+
+class TestCoachCatalog:
+    def test_coach_tables_exist(self, db):
+        tables = {
+            row[0]
+            for row in db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "coach_tracks" in tables
+        assert "coach_assets" in tables
+        assert "coach_jobs" in tables
+
+    def test_upsert_coach_track_round_trip(self, db):
+        track = db.upsert_coach_track(
+            source_type="youtube",
+            source_url="https://youtube.com/watch?v=abc12345678",
+            source_id="abc12345678",
+            display_title="Artist - Song",
+            title="Song",
+        )
+
+        assert track["id"]
+        assert track["status"] == "queued"
+        assert db.find_coach_track_by_source("youtube", "abc12345678")["id"] == track["id"]
+
+        updated = db.upsert_coach_track(
+            source_type="youtube",
+            source_url="https://music.youtube.com/watch?v=abc12345678",
+            source_id="abc12345678",
+            display_title="Artist - Song Official Audio",
+            status="processing",
+        )
+
+        assert updated["id"] == track["id"]
+        assert updated["status"] == "processing"
+        assert updated["display_title"] == "Artist - Song Official Audio"
+
+    def test_coach_assets_round_trip(self, db):
+        track = db.upsert_coach_track(
+            source_type="local",
+            source_url="/songs/a.mp3",
+            source_id="/songs/a.mp3",
+            display_title="a",
+        )
+
+        assets = db.set_coach_assets(
+            track["id"],
+            original_audio_path="/songs/a.mp3",
+            guide_path="/songs/a.biaoke-guide.json",
+        )
+
+        assert assets["original_audio_path"] == "/songs/a.mp3"
+        assert db.get_coach_assets(track["id"])["guide_path"] == "/songs/a.biaoke-guide.json"
+
+    def test_find_coach_track_by_media_path_matches_stems_and_original(self, db):
+        track = db.upsert_coach_track(
+            source_type="local",
+            source_url="/songs/a.mp3",
+            source_id="/songs/a.mp3",
+            display_title="Artist - Song",
+            file_path="/songs/a.mp3",
+        )
+        db.set_coach_assets(
+            track["id"],
+            original_audio_path="/songs/a.mp3",
+            instrumental_audio_path="/songs/.biaoke-stems/a.instrumental.wav",
+            vocal_reference_path="/songs/.biaoke-stems/a.vocals.wav",
+        )
+
+        assert db.find_coach_track_by_media_path("/songs/a.mp3")["id"] == track["id"]
+        assert (
+            db.find_coach_track_by_media_path("/songs/.biaoke-stems/a.instrumental.wav")["id"]
+            == track["id"]
+        )
+        assert (
+            db.find_coach_track_by_media_path("/songs/.biaoke-stems/a.vocals.wav")["id"]
+            == track["id"]
+        )
+
+    def test_coach_jobs_round_trip(self, db):
+        track = db.upsert_coach_track(
+            source_type="youtube",
+            source_url="url",
+            source_id="id",
+            display_title="title",
+        )
+        job = db.create_coach_job(track["id"], stage="acquire")
+
+        assert job["status"] == "queued"
+
+        updated = db.update_coach_job(job["id"], status="running", progress=25)
+
+        assert updated["status"] == "running"
+        assert updated["progress"] == 25
+        assert db.list_coach_jobs(track["id"])[0]["id"] == job["id"]
+        assert db.get_next_coach_job(stage="acquire", status="running")["id"] == job["id"]
+
+    def test_requeue_interrupted_coach_analysis_jobs(self, db):
+        track = db.upsert_coach_track(
+            source_type="youtube",
+            source_url="url",
+            source_id="id",
+            display_title="title",
+        )
+        analysis_job = db.create_coach_job(track["id"], stage="build_guide")
+        acquire_job = db.create_coach_job(track["id"], stage="acquire")
+
+        db.update_coach_job(analysis_job["id"], status="running", progress=10)
+        db.update_coach_job(acquire_job["id"], status="running", progress=10)
+
+        assert db.requeue_interrupted_coach_analysis_jobs() == 1
+
+        recovered = db.get_coach_job(analysis_job["id"])
+        still_running = db.get_coach_job(acquire_job["id"])
+
+        assert recovered["stage"] == "analyze_pending"
+        assert recovered["status"] == "queued"
+        assert recovered["progress"] == 0
+        assert recovered["started_at"] is None
+        assert still_running["stage"] == "acquire"
+        assert still_running["status"] == "running"
 
 
 class TestApplyScanDiff:

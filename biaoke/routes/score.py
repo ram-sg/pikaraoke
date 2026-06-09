@@ -20,7 +20,7 @@ from biaoke.lib.scoring import (
     midi_to_note_name,
 )
 from biaoke.lib.song_guide import ensure_song_guide, guide_path_for_media
-from biaoke.lib.song_guide import get_lyrics_offset, set_lyrics_offset
+from biaoke.lib.song_guide import get_lyrics_offset, load_song_guide, set_lyrics_offset
 
 score_bp = Blueprint("score", __name__)
 
@@ -87,6 +87,26 @@ def current_melody_guide():
             }
         ), 404
 
+    coach_guide = _get_coach_guide_for_path(k, path)
+    if coach_guide:
+        melody = deepcopy(coach_guide.get("melody") or {})
+        melody.setdefault("status", "ready")
+        melody.setdefault("notes", [])
+        if melody.get("notes"):
+            quality = coach_guide.get("quality") or {}
+            melody.update(
+                {
+                    "title": controller.now_playing,
+                    "playback_position": controller.now_playing_position or 0,
+                    "is_paused": controller.is_paused,
+                    "transpose": controller.now_playing_transpose or 0,
+                    "guide_status": quality.get("status"),
+                    "quality_messages": quality.get("messages") or [],
+                    "coach_track_id": (coach_guide.get("track") or {}).get("id"),
+                }
+            )
+            return jsonify(_transpose_guide(melody, int(controller.now_playing_transpose or 0)))
+
     try:
         guide = _get_cached_melody_guide(path)
     except ScoreAnalysisError as exc:
@@ -128,6 +148,25 @@ def current_lyrics_guide():
                 "lines": [],
             }
         ), 404
+
+    coach_guide = _get_coach_guide_for_path(k, path)
+    if coach_guide:
+        lyrics = deepcopy(coach_guide.get("lyrics") or {})
+        quality = coach_guide.get("quality") or {}
+        lyrics.setdefault("status", "missing")
+        lyrics.setdefault("lines", [])
+        lyrics.update(
+            {
+                "title": controller.now_playing,
+                "playback_position": controller.now_playing_position or 0,
+                "is_paused": controller.is_paused,
+                "guide_status": quality.get("status"),
+                "quality_messages": quality.get("messages") or [],
+                "lyrics_offset_seconds": _coach_lyrics_offset(coach_guide),
+                "coach_track_id": (coach_guide.get("track") or {}).get("id"),
+            }
+        )
+        return jsonify(lyrics)
 
     try:
         guide = ensure_song_guide(path, rebuild=_truthy(request.args.get("rebuild")))
@@ -184,6 +223,39 @@ def current_lyrics_offset():
             }
         ), 404
 
+    coach_guide = _get_coach_guide_for_path(k, path)
+    if coach_guide:
+        source_path = _coach_source_media_path(coach_guide) or path
+        try:
+            guide = ensure_song_guide(source_path)
+            if request.method == "POST":
+                payload = request.get_json(silent=True) or request.form.to_dict()
+                current_offset = get_lyrics_offset(guide)
+                if "delta_seconds" in payload:
+                    requested_offset = current_offset + float(payload["delta_seconds"])
+                else:
+                    requested_offset = float(payload.get("offset_seconds", current_offset))
+                guide = set_lyrics_offset(source_path, requested_offset)
+        except (TypeError, ValueError) as exc:
+            return jsonify({"status": "error", "message": str(exc), "lyrics_offset_seconds": 0}), 400
+        except Exception as exc:
+            logging.warning("Failed to update coach lyrics offset for %s: %s", path, exc)
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Nao foi possivel salvar o sincronismo da legenda.",
+                    "lyrics_offset_seconds": 0,
+                }
+            ), 500
+
+        return jsonify(
+            {
+                "status": "ready",
+                "title": controller.now_playing,
+                "lyrics_offset_seconds": get_lyrics_offset(guide),
+            }
+        )
+
     try:
         guide = ensure_song_guide(path)
         if request.method == "POST":
@@ -239,6 +311,17 @@ def current_song_guide():
                 "lyrics": {"status": "error", "lines": []},
             }
         ), 404
+
+    coach_guide = _get_coach_guide_for_path(k, path)
+    if coach_guide:
+        payload = deepcopy(coach_guide)
+        payload["status"] = (coach_guide.get("quality") or {}).get("status", "unknown")
+        payload["runtime"] = {
+            "title": controller.now_playing,
+            "playback_position": controller.now_playing_position or 0,
+            "is_paused": controller.is_paused,
+        }
+        return jsonify(payload)
 
     try:
         guide = ensure_song_guide(path, rebuild=_truthy(request.args.get("rebuild")))
@@ -305,6 +388,43 @@ def _analyze_with_service(
     response = requests.post(service_url, files=files, timeout=180)
     response.raise_for_status()
     return response.json()
+
+
+def _get_coach_guide_for_path(k, path: Path) -> dict | None:
+    coach_preparation = getattr(k, "coach_preparation", None)
+    if not coach_preparation:
+        return None
+    load_guide = getattr(coach_preparation, "load_coach_guide_for_media_path", None)
+    if not callable(load_guide):
+        return None
+    try:
+        guide = load_guide(path)
+    except Exception as exc:
+        logging.warning("Failed to load coach guide for %s: %s", path, exc)
+        return None
+    if not isinstance(guide, dict):
+        return None
+    return guide
+
+
+def _coach_source_media_path(coach_guide: dict) -> Path | None:
+    assets = coach_guide.get("assets") or {}
+    media = coach_guide.get("media") or {}
+    source = assets.get("original_audio_path") or media.get("path")
+    if not source:
+        return None
+    path = Path(str(source))
+    return path if path.is_file() else None
+
+
+def _coach_lyrics_offset(coach_guide: dict) -> float:
+    source_path = _coach_source_media_path(coach_guide)
+    if not source_path:
+        return 0.0
+    try:
+        return get_lyrics_offset(load_song_guide(source_path))
+    except Exception:
+        return 0.0
 
 
 def _truthy(value: str | None) -> bool:

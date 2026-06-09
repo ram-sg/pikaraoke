@@ -100,6 +100,34 @@ class TestPlaybackControllerPlayFile:
 
     @patch("biaoke.lib.playback_controller.os.path.isfile", return_value=True)
     @patch("biaoke.lib.playback_controller.time.sleep")
+    def test_play_file_uses_display_title_when_provided(self, mock_sleep, mock_isfile, test_prefs):
+        """Prepared coach stems should show the original song title."""
+        events = EventSystem()
+        filename_fn = MagicMock(return_value="Technical Stem Name")
+
+        pc = PlaybackController(test_prefs, events, filename_fn)
+        pc.stream_manager.play_file = MagicMock(
+            return_value=PlaybackResult(
+                success=True,
+                stream_url="/stream/123.m3u8",
+                subtitle_url=None,
+                duration=180,
+            )
+        )
+        pc.is_playing = True
+
+        result = pc.play_file(
+            "/songs/.biaoke-stems/song.instrumental.wav",
+            "TestUser",
+            display_title="Artist - Song",
+        )
+
+        assert result.success is True
+        assert pc.now_playing == "Artist - Song"
+        filename_fn.assert_not_called()
+
+    @patch("biaoke.lib.playback_controller.os.path.isfile", return_value=True)
+    @patch("biaoke.lib.playback_controller.time.sleep")
     @patch("flask_babel._", side_effect=lambda x: x)
     def test_play_file_timeout(self, mock_gettext, mock_sleep, mock_isfile, test_prefs):
         """Test playback timeout when client never connects."""

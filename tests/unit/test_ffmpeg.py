@@ -5,8 +5,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from biaoke.lib.ffmpeg import (
+    build_ffmpeg_cmd,
     get_ffmpeg_version,
     get_media_duration,
+    has_video_stream,
     is_ffmpeg_installed,
     is_transpose_enabled,
     supports_hardware_h264_encoding,
@@ -148,6 +150,73 @@ class TestGetMediaDuration:
             mock_probe.return_value = {"format": {"duration": "120"}}
             result = get_media_duration("/path/to/video.mp4")
             assert result == 120
+
+
+class TestHasVideoStream:
+    """Tests for media stream probing."""
+
+    def test_detects_video_stream(self):
+        with patch("biaoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
+            mock_probe.return_value = {
+                "streams": [
+                    {"codec_type": "audio"},
+                    {"codec_type": "video"},
+                ]
+            }
+
+            assert has_video_stream("/path/to/video.mp4") is True
+
+    def test_returns_false_for_audio_only(self):
+        with patch("biaoke.lib.ffmpeg.ffmpeg.probe") as mock_probe:
+            mock_probe.return_value = {"streams": [{"codec_type": "audio"}]}
+
+            assert has_video_stream("/path/to/stem.wav") is False
+
+    def test_returns_false_on_probe_error(self):
+        with patch("biaoke.lib.ffmpeg.ffmpeg.probe", side_effect=Exception("probe failed")):
+            assert has_video_stream("/path/to/broken.wav") is False
+
+
+class TestBuildFfmpegCmd:
+    """Tests for FFmpeg command generation."""
+
+    def _resolver(self, file_path="/songs/stem.wav", extension=".wav"):
+        resolver = MagicMock()
+        resolver.file_path = file_path
+        resolver.file_extension = extension
+        resolver.cdg_file_path = None
+        resolver.output_file = "/tmp/stream.m3u8"
+        resolver.init_filename = "init.mp4"
+        resolver.segment_pattern = "/tmp/segment_%03d.m4s"
+        return resolver
+
+    @patch("biaoke.lib.ffmpeg.supports_hardware_h264_encoding", return_value=False)
+    @patch("biaoke.lib.ffmpeg.has_video_stream", return_value=False)
+    def test_audio_only_hls_command_does_not_map_video(self, mock_has_video, mock_hw):
+        resolver = self._resolver()
+
+        args = build_ffmpeg_cmd(resolver, normalize_audio=False).get_args()
+
+        assert "-map" in args
+        assert "0:a" in args
+        assert "0:v" not in args
+        assert "-acodec" in args
+        assert args[args.index("-acodec") + 1] == "aac"
+        assert "-vcodec" not in args
+        assert "-b:v" not in args
+        assert "-f" in args
+        assert args[args.index("-f") + 1] == "hls"
+
+    @patch("biaoke.lib.ffmpeg.supports_hardware_h264_encoding", return_value=False)
+    @patch("biaoke.lib.ffmpeg.has_video_stream", return_value=True)
+    def test_video_hls_command_maps_video(self, mock_has_video, mock_hw):
+        resolver = self._resolver(file_path="/songs/video.mp4", extension=".mp4")
+
+        args = build_ffmpeg_cmd(resolver, normalize_audio=False).get_args()
+
+        assert "0:a" in args
+        assert "0:v" in args
+        assert "-vcodec" in args
 
 
 class TestIsTransposeEnabledIndexError:

@@ -109,6 +109,17 @@ class TestQueueManagerEnqueue:
 
         assert queue_manager.queue[0]["semitones"] == 3
 
+    def test_enqueue_uses_explicit_title_when_provided(self, queue_manager):
+        """Prepared coach assets should keep their human display title."""
+        result = queue_manager.enqueue(
+            "/songs/.biaoke-stems/song.instrumental.wav",
+            "User1",
+            title="Artist - Song",
+        )
+
+        assert result[0] is True
+        assert queue_manager.queue[0]["title"] == "Artist - Song"
+
     def test_enqueue_emits_queue_update(self, queue_manager):
         """Enqueuing should emit queue_update event."""
         captured = []

@@ -19,6 +19,7 @@ from biaoke.lib.ffmpeg import (
     is_transpose_enabled,
     supports_hardware_h264_encoding,
 )
+from biaoke.lib.coach_preparation import CoachPreparationManager
 from biaoke.lib.get_platform import (
     get_data_directory,
     get_os_version,
@@ -267,7 +268,17 @@ class Karaoke:
             youtubedl_proxy=self.youtubedl_proxy,
             additional_ytdl_args=self.additional_ytdl_args,
         )
+        self.coach_preparation = CoachPreparationManager(
+            db=self.db,
+            events=self.events,
+            download_manager=self.download_manager,
+            download_path=self.download_path,
+        )
+        self.events.on("download_item_started", self.coach_preparation.handle_download_started)
+        self.events.on("download_item_completed", self.coach_preparation.handle_download_completed)
+        self.events.on("download_item_failed", self.coach_preparation.handle_download_failed)
         self.download_manager.start()
+        self.coach_preparation.start()
 
         # Song library startup: warm cache from DB or blocking cold scan
         paths = self.db.get_all_song_paths()
@@ -528,6 +539,8 @@ class Karaoke:
 
     def stop(self) -> None:
         """Stop the karaoke run loop."""
+        if hasattr(self, "coach_preparation"):
+            self.coach_preparation.stop()
         self.running = False
 
     def handle_run_loop(self) -> None:
@@ -600,7 +613,10 @@ class Karaoke:
                     if not song:
                         continue
                     result = self.playback_controller.play_file(
-                        song["file"], song["user"], song["semitones"]
+                        song["file"],
+                        song["user"],
+                        song["semitones"],
+                        display_title=song.get("title"),
                     )
 
                     if not result.success and result.error:

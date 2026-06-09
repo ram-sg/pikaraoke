@@ -122,6 +122,7 @@ class TestDownloadManagerQueueDownload:
             enqueue=True,
             user="TestUser",
             title="Test Song",
+            context={"coach_track_id": 7},
         )
 
         item = download_manager.download_queue.get_nowait()
@@ -129,6 +130,20 @@ class TestDownloadManagerQueueDownload:
         assert item["enqueue"] is True
         assert item["user"] == "TestUser"
         assert item["title"] == "Test Song"
+        assert item["context"] == {"coach_track_id": 7}
+        assert item["download_subtitles"] is True
+
+    @patch("flask_babel._", side_effect=lambda x: x)
+    def test_queue_download_can_disable_subtitles(self, mock_gettext, download_manager):
+        """Coach preparation can skip yt-dlp subtitle downloads."""
+        download_manager.queue_download(
+            "https://youtube.com/watch?v=test123",
+            user="TestUser",
+            download_subtitles=False,
+        )
+
+        item = download_manager.download_queue.get_nowait()
+        assert item["download_subtitles"] is False
 
     @patch("flask_babel._", side_effect=lambda x: x)
     def test_queue_download_strips_playlist_param(self, mock_gettext, download_manager):
@@ -207,6 +222,59 @@ class TestDownloadManagerExecuteDownload:
         queue_manager.enqueue.assert_called_once_with(
             "/songs/Song---abc.mp4", "TestUser", log_action=False
         )
+
+    @patch("flask_babel._", side_effect=lambda x: x)
+    @patch("subprocess.Popen")
+    @patch("biaoke.lib.download_manager.build_ytdl_download_command")
+    def test_execute_download_emits_context_lifecycle(
+        self, mock_build_cmd, mock_popen, mock_gettext, download_manager, song_manager, events
+    ):
+        """Download lifecycle events include the opaque caller context."""
+        seen = []
+        events.on("download_item_started", lambda context: seen.append(("started", context)))
+        events.on(
+            "download_item_completed",
+            lambda song_path, context, *_args: seen.append(("completed", song_path, context)),
+        )
+
+        mock_build_cmd.return_value = ["yt-dlp", "url"]
+        mock_process = MagicMock()
+        mock_process.stdout.readline.side_effect = ["Starting download...", ""]
+        mock_process.poll.return_value = 0
+        mock_popen.return_value = mock_process
+        song_manager.songs.find_by_id.return_value = "/songs/Song---abc.mp4"
+
+        context = {"coach_track_id": 1, "coach_job_id": 2}
+        download_manager._execute_download(
+            "https://youtube.com/watch?v=abc", False, "TestUser", "Title", context
+        )
+
+        assert seen[0] == ("started", context)
+        assert seen[1] == ("completed", "/songs/Song---abc.mp4", context)
+
+    @patch("flask_babel._", side_effect=lambda x: x)
+    @patch("subprocess.Popen")
+    @patch("biaoke.lib.download_manager.build_ytdl_download_command")
+    def test_execute_download_passes_subtitle_flag_to_ytdl(
+        self, mock_build_cmd, mock_popen, mock_gettext, download_manager, song_manager
+    ):
+        """Download execution forwards the subtitle mode into the yt-dlp command."""
+        mock_build_cmd.return_value = ["yt-dlp", "url"]
+        mock_process = MagicMock()
+        mock_process.stdout.readline.side_effect = ["Starting download...", ""]
+        mock_process.poll.return_value = 0
+        mock_popen.return_value = mock_process
+        song_manager.songs.find_by_id.return_value = "/songs/Song---abc.mp4"
+
+        download_manager._execute_download(
+            "https://youtube.com/watch?v=abc",
+            False,
+            "TestUser",
+            "Title",
+            download_subtitles=False,
+        )
+
+        assert mock_build_cmd.call_args.kwargs["download_subtitles"] is False
 
     @patch("flask_babel._", side_effect=lambda x: x)
     @patch("subprocess.run")

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Queue
 from threading import Thread
 from typing import Any
@@ -73,6 +74,28 @@ class StreamManager:
         self.ffmpeg_process = None
         self.ffmpeg_log: Queue | None = None
 
+    def _should_fully_buffer_audio(self, file_path: str, semitones: int) -> bool:
+        """Use a complete MP4 transcode for audio-only stems before playback.
+
+        Realtime HLS is useful for video, but audio-only coach stems are already
+        local and cheap to transcode. Buffering them fully avoids hls.js treating
+        the stream as live and jumping across generated segments.
+        """
+        if self.streaming_format != "hls":
+            return False
+        if semitones != 0:
+            return False
+        return Path(file_path).suffix.casefold() in {
+            ".aac",
+            ".aiff",
+            ".aif",
+            ".flac",
+            ".m4a",
+            ".ogg",
+            ".opus",
+            ".wav",
+        }
+
     def play_file(self, file_path: str, semitones: int = 0) -> PlaybackResult:
         """Start playback of a media file.
 
@@ -87,12 +110,13 @@ class StreamManager:
         """
         from flask_babel import _
 
-        streaming_format = self.streaming_format
+        force_full_audio_buffer = self._should_fully_buffer_audio(file_path, semitones)
+        streaming_format = "mp4" if force_full_audio_buffer else self.streaming_format
         normalize_audio = self.preferences.get_or_default("normalize_audio")
         avsync = self.preferences.get_or_default("avsync")
         complete_transcode_before_play = self.preferences.get_or_default(
             "complete_transcode_before_play"
-        )
+        ) or force_full_audio_buffer
 
         is_hls = streaming_format == "hls"
 
@@ -127,7 +151,10 @@ class StreamManager:
             is_buffering_complete = True
         else:
             is_transcoding_complete, is_buffering_complete = self._transcode_file(
-                fr, semitones, is_hls
+                fr,
+                semitones,
+                is_hls,
+                force_complete=force_full_audio_buffer,
             )
 
         subtitle_url = None
@@ -169,7 +196,13 @@ class StreamManager:
         logging.debug(f"Copying file failed: {dest_path}")
         return False
 
-    def _transcode_file(self, fr: FileResolver, semitones: int, is_hls: bool) -> tuple[bool, bool]:
+    def _transcode_file(
+        self,
+        fr: FileResolver,
+        semitones: int,
+        is_hls: bool,
+        force_complete: bool = False,
+    ) -> tuple[bool, bool]:
         """Transcode a file using FFmpeg.
 
         Args:
@@ -183,8 +216,8 @@ class StreamManager:
         self.kill_ffmpeg()
 
         normalize_audio = self.preferences.get_or_default("normalize_audio")
-        complete_transcode_before_play = self.preferences.get_or_default(
-            "complete_transcode_before_play"
+        complete_transcode_before_play = (
+            self.preferences.get_or_default("complete_transcode_before_play") or force_complete
         )
         avsync = self.preferences.get_or_default("avsync")
         cdg_pixel_scaling = self.preferences.get_or_default("cdg_pixel_scaling")
@@ -230,11 +263,13 @@ class StreamManager:
                     logging.debug(f"Transcoding complete. Output size: {stream_size}")
                     break
 
-            # Check buffering progress based on streaming format
-            if is_hls:
-                is_buffering_complete = self._check_hls_buffer(fr, buffer_size)
-            else:
-                is_buffering_complete = self._check_mp4_buffer(fr, buffer_size)
+            # Check buffering progress based on streaming format. Forced complete
+            # transcodes intentionally skip early playback.
+            if not force_complete:
+                if is_hls:
+                    is_buffering_complete = self._check_hls_buffer(fr, buffer_size)
+                else:
+                    is_buffering_complete = self._check_mp4_buffer(fr, buffer_size)
 
             if is_buffering_complete:
                 break

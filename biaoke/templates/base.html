@@ -130,6 +130,9 @@
       if (currentPath == "/search") {
         $("#search").addClass("is-active")
       }
+      if (currentPath == "/prepare") {
+        $("#prepare").addClass("is-active")
+      }
       if (currentPath == "/browse") {
         $("#browse").addClass("is-active")
       }
@@ -219,6 +222,10 @@
           <i class="icon icon-search-1" title="Search"></i>
           {# MSG: Navigation link for the search page add songs to the queue. #}
           <span>{% trans %}Search{% endtrans %}</span>
+        </a>
+        <a id="prepare" class="navbar-item" href="{{ url_for('prepare.prepare') }}">
+          <i class="icon icon-list-add" title="Prepare"></i>
+          <span>Preparar</span>
         </a>
         <a id="browse" class="navbar-item" href="{{ url_for('files.browse') }}">
           <i class="icon icon-folder-open-empty" title="Browse"></i>
