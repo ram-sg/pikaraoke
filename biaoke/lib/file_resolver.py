@@ -12,6 +12,51 @@ from biaoke.lib.ffmpeg import get_media_duration
 from biaoke.lib.get_platform import get_platform
 
 
+_PREFERRED_SUBTITLE_LANGS = ("pt", "pt-br", "en", "en-us", "en-gb", "es")
+
+
+def _subtitle_preference_key(base_name: str, subtitle_path: str) -> tuple[int, str]:
+    """Sort sidecar ASS subtitles by preferred language and stable filename."""
+    filename = os.path.basename(subtitle_path)
+    base_file = os.path.basename(base_name)
+    suffix = filename[len(base_file) :].casefold().strip(".")
+    if suffix.endswith(".ass"):
+        suffix = suffix[:-4]
+    normalized = suffix.replace("_", "-")
+    for index, language in enumerate(_PREFERRED_SUBTITLE_LANGS):
+        if normalized == language or normalized.startswith(f"{language}-"):
+            return (index, filename.casefold())
+    return (len(_PREFERRED_SUBTITLE_LANGS), filename.casefold())
+
+
+def find_ass_subtitle_for_media(file_path: str) -> str | None:
+    """Find the best ASS subtitle sidecar for a media file."""
+    base_name = os.path.splitext(file_path)[0]
+
+    for ext in (".ass", ".ASS", ".Ass"):
+        ass_path = base_name + ext
+        if os.path.exists(ass_path):
+            return ass_path
+
+    directory = os.path.dirname(base_name) or "."
+    base_file = os.path.basename(base_name)
+    try:
+        candidates = [
+            os.path.join(directory, name)
+            for name in os.listdir(directory)
+            if name.casefold().startswith(f"{base_file.casefold()}.")
+            and name.casefold().endswith(".ass")
+        ]
+    except OSError:
+        candidates = []
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda path: _subtitle_preference_key(base_name, path))
+    return candidates[0]
+
+
 def get_tmp_dir() -> str:
     """Get the temporary directory path scoped to this process.
 
@@ -154,7 +199,8 @@ class FileResolver:
     def handle_aegissub_subtile(self, file_path: str) -> bool:
         """Find and set the ASS subtitle file path for an media file.
 
-        Searches for an ASS file with the same base name as the media.
+        Searches for an ASS file with the same base name as the media. Also
+        accepts yt-dlp language suffixes like ".pt.ass" or ".en-US.ass".
 
         Args:
             file_path: Path to the media file.
@@ -162,16 +208,12 @@ class FileResolver:
         Returns:
             True if ASS file found, False otherwise.
         """
-        base_name = os.path.splitext(file_path)[0]
-
-        # Check common case variations without listing directory
-        for ext in (".ass", ".ASS", ".Ass"):
-            ass_path = base_name + ext
-            if os.path.exists(ass_path):
-                self.file_path = file_path
-                self.ass_file_path = ass_path
-                logging.debug(f"Subtitle file found: {ass_path}")
-                return True
+        ass_path = find_ass_subtitle_for_media(file_path)
+        if ass_path:
+            self.file_path = file_path
+            self.ass_file_path = ass_path
+            logging.debug(f"Subtitle file found: {ass_path}")
+            return True
         return False
 
     def handle_zipped_cdg(self, file_path: str) -> None:

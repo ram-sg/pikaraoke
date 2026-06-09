@@ -276,6 +276,40 @@ class TestFileResolverHandleAegissubSubtitle:
     @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
     @patch("biaoke.lib.file_resolver.create_tmp_dir")
     @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    def test_finds_language_suffixed_ass_file(
+        self, mock_tmp, mock_create, mock_duration, tmp_path
+    ):
+        """Test finding yt-dlp language-suffixed .ass subtitle files."""
+        video_file = tmp_path / "song.mp4"
+        ass_file = tmp_path / "song.en.ass"
+        video_file.touch()
+        ass_file.touch()
+
+        fr = FileResolver(str(video_file))
+
+        assert fr.ass_file_path == str(ass_file)
+
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
+    def test_prefers_portuguese_language_suffixed_ass_file(
+        self, mock_tmp, mock_create, mock_duration, tmp_path
+    ):
+        """Test preferring Portuguese sidecar subtitles when multiple languages exist."""
+        video_file = tmp_path / "song.mp4"
+        en_file = tmp_path / "song.en.ass"
+        pt_file = tmp_path / "song.pt-BR.ass"
+        video_file.touch()
+        en_file.touch()
+        pt_file.touch()
+
+        fr = FileResolver(str(video_file))
+
+        assert fr.ass_file_path == str(pt_file)
+
+    @patch("biaoke.lib.file_resolver.get_media_duration", return_value=180)
+    @patch("biaoke.lib.file_resolver.create_tmp_dir")
+    @patch("biaoke.lib.file_resolver.get_tmp_dir", return_value="/tmp/12345")
     def test_no_ass_file(self, mock_tmp, mock_create, mock_duration, tmp_path):
         """Test when no .ass file exists."""
         video_file = tmp_path / "song.mp4"

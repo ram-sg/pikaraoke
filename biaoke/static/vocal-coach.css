@@ -105,6 +105,45 @@ body {
   text-transform: uppercase;
 }
 
+.coach-sync-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 8px;
+  color: #f8f7ef;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(6, 9, 14, 0.72);
+}
+
+.coach-sync-controls span {
+  color: #b9c4c0;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.coach-sync-controls strong {
+  min-width: 46px;
+  color: #9be6d6;
+  font-size: 13px;
+  text-align: center;
+}
+
+.coach-controls .coach-sync-controls button {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: #f8f7ef;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(17, 22, 29, 0.94);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.coach-controls .coach-sync-controls button:hover {
+  border-color: rgba(155, 230, 214, 0.72);
+}
+
 .coach-controls select,
 .coach-controls button {
   color: #f8f7ef;
@@ -130,10 +169,344 @@ body {
   font-weight: 800;
 }
 
+.coach-player-grid {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
+  gap: 12px;
+}
+
+.coach-karaoke-stage {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.coach-video-container {
+  position: relative;
+  min-height: 420px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #000;
+  overflow: hidden;
+}
+
+#coach-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  display: block;
+  background: #000;
+  object-fit: contain;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.coach-performance-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.82)),
+    radial-gradient(circle at 50% 74%, rgba(18, 199, 156, 0.16), transparent 28%),
+    url("images/biaoke-splash-bg.png");
+  background-position: center;
+  background-size: cover;
+}
+
+.coach-performance-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.45), transparent 24%, transparent 76%, rgba(0, 0, 0, 0.45)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 110px);
+}
+
+.coach-light-rig {
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 42%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  pointer-events: none;
+}
+
+.coach-light-rig i {
+  display: block;
+  transform-origin: top center;
+  background: linear-gradient(180deg, rgba(246, 243, 234, 0.22), rgba(18, 199, 156, 0.05), transparent 82%);
+  clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%);
+}
+
+.coach-light-rig i:nth-child(1),
+.coach-light-rig i:nth-child(4) {
+  transform: skewX(-12deg);
+}
+
+.coach-light-rig i:nth-child(2),
+.coach-light-rig i:nth-child(3) {
+  transform: skewX(12deg);
+}
+
+.coach-note-road {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 6px;
+  height: 34%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  transform: perspective(720px) rotateX(58deg);
+  transform-origin: bottom center;
+  border-top: 2px solid rgba(155, 230, 214, 0.36);
+}
+
+.coach-note-road i {
+  border-left: 1px solid rgba(155, 230, 214, 0.2);
+}
+
+.coach-note-road i:last-child {
+  border-right: 1px solid rgba(155, 230, 214, 0.2);
+}
+
+.coach-idle {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  align-content: center;
+  color: #f6f3ea;
+  text-align: center;
+  background:
+    linear-gradient(180deg, rgba(5, 7, 10, 0.12), rgba(5, 7, 10, 0.72)),
+    url("images/biaoke-splash-bg.png");
+  background-position: center;
+  background-size: cover;
+  transition: opacity 180ms linear;
+}
+
+.coach-video-container.is-playing .coach-idle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.coach-idle strong {
+  font-size: clamp(42px, 8vw, 96px);
+  line-height: 1;
+}
+
+.coach-idle span {
+  color: #9be6d6;
+  font-size: clamp(16px, 2vw, 24px);
+}
+
+.coach-now-playing {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  pointer-events: none;
+}
+
+.coach-now-playing > div:first-child,
+.coach-clock,
+.coach-up-next {
+  max-width: min(720px, 80%);
+  padding: 10px 12px;
+  background: rgba(2, 5, 8, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(10px);
+}
+
+.coach-now-playing span,
+.coach-up-next span {
+  display: block;
+  color: #9be6d6;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.coach-now-playing strong,
+.coach-up-next strong {
+  display: block;
+  color: #f8f7ef;
+  font-size: clamp(18px, 2.1vw, 30px);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.coach-now-playing small,
+.coach-up-next small {
+  color: #edb049;
+  display: block;
+  margin-top: 4px;
+}
+
+.coach-clock {
+  color: #f8f7ef;
+  font-size: clamp(16px, 2vw, 26px);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.coach-autoplay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.coach-autoplay[hidden] {
+  display: none;
+}
+
+.coach-autoplay button {
+  min-height: 48px;
+  padding: 0 18px;
+  color: #04110e;
+  border: 1px solid rgba(31, 216, 169, 0.72);
+  background: #12c79c;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.coach-lyrics {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  padding: 70px clamp(18px, 4vw, 56px) 38px;
+  color: #f8f7ef;
+  text-align: center;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.78) 58%, rgba(0, 0, 0, 0.9));
+  pointer-events: none;
+}
+
+.coach-lyrics-status {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 8;
+  max-width: min(360px, calc(100% - 28px));
+  padding: 5px 9px;
+  color: #cbd4d0;
+  background: rgba(3, 6, 10, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 12px;
+  text-transform: uppercase;
+  text-align: right;
+  pointer-events: none;
+}
+
+.coach-lyrics-status.is-ready {
+  color: #071310;
+  background: #9be6d6;
+  border-color: #9be6d6;
+}
+
+.coach-lyrics-status.is-warning {
+  color: #211501;
+  background: #edb049;
+  border-color: #edb049;
+}
+
+.coach-lyrics-status.is-danger {
+  color: #fff8f5;
+  background: #cf4d43;
+  border-color: #cf4d43;
+}
+
+.coach-lyrics-current {
+  min-height: 1.35em;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: clamp(30px, 5vw, 66px);
+  font-weight: 900;
+  line-height: 1.12;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.94);
+  overflow-wrap: anywhere;
+}
+
+.coach-lyrics-next {
+  min-height: 1.25em;
+  margin-top: 10px;
+  color: rgba(246, 243, 234, 0.76);
+  font-size: clamp(18px, 2.7vw, 34px);
+  font-weight: 700;
+  line-height: 1.15;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.88);
+  overflow-wrap: anywhere;
+}
+
+.coach-lyric-token {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.coach-lyric-token.is-done {
+  color: #12c79c;
+}
+
+.coach-lyric-token.is-active {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    #12c79c 0%,
+    #12c79c var(--token-progress),
+    #f8f7ef var(--token-progress),
+    #f8f7ef 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+.coach-song-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 7;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.coach-song-progress i {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: #12c79c;
+  transition: width 120ms linear;
+}
+
+.coach-up-next {
+  display: none;
+}
+
+.coach-up-next.is-visible {
+  display: block;
+}
+
 .coach-stage {
   position: relative;
   z-index: 1;
-  min-height: 360px;
+  min-width: 0;
+  min-height: 420px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(3, 6, 10, 0.76);
   overflow: hidden;
@@ -306,6 +679,33 @@ body {
   .coach-controls {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .coach-player-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .coach-video-container,
+  #coach-video {
+    min-height: 48svh;
+  }
+
+  .coach-now-playing {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    gap: 8px;
+  }
+
+  .coach-now-playing > div:first-child,
+  .coach-clock,
+  .coach-up-next {
+    max-width: 100%;
+    padding: 8px 9px;
+  }
+
+  .coach-lyrics {
+    padding: 54px 12px 28px;
   }
 
   .coach-stage {

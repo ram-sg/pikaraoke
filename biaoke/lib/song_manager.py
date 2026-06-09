@@ -71,7 +71,7 @@ class SongManager:
         return self.filename_from_path(file_path, remove_youtube_id=remove_youtube_id, tidy=tidy)
 
     def _get_companion_files(self, song_path: str) -> list[str]:
-        """Return paths to companion files (.cdg, .ass) that exist alongside a song."""
+        """Return paths to companion files that exist alongside a song."""
         dirpath = os.path.dirname(song_path)
         base = os.path.splitext(os.path.basename(song_path))[0]
         try:
@@ -81,8 +81,14 @@ class SongManager:
         base_lower = base.lower()
         companions = []
         for f in files:
-            f_base, f_ext = os.path.splitext(f)
-            if f_base.lower() == base_lower and f_ext.lower() in (".cdg", ".ass"):
+            name_lower = f.lower()
+            exact_base = name_lower in (
+                f"{base_lower}.cdg",
+                f"{base_lower}.ass",
+                f"{base_lower}.biaoke-guide.json",
+            )
+            language_ass = name_lower.startswith(f"{base_lower}.") and name_lower.endswith(".ass")
+            if exact_base or language_ass:
                 companions.append(os.path.join(dirpath, f))
         return companions
 
@@ -111,9 +117,11 @@ class SongManager:
         _, ext = os.path.splitext(song_path)
         new_path = os.path.join(self.download_path, new_name + ext)
         os.rename(song_path, new_path)
+        old_base = os.path.splitext(os.path.basename(song_path))[0]
         for companion in companions:
-            companion_ext = os.path.splitext(companion)[1]
-            os.rename(companion, os.path.join(self.download_path, new_name + companion_ext))
+            companion_name = os.path.basename(companion)
+            companion_suffix = companion_name[len(old_base) :]
+            os.rename(companion, os.path.join(self.download_path, new_name + companion_suffix))
         self.songs.rename(song_path, new_path)
         self._db.update_path(song_path, new_path)
         return new_path

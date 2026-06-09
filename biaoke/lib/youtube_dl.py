@@ -10,6 +10,7 @@ import sys
 from biaoke.lib.get_platform import get_installed_js_runtime
 
 yt_dlp_cmd = [sys.executable, "-m", "yt_dlp"]
+_DEFAULT_SUBTITLE_LANGS = "pt.*,pt,en.*,en,es.*,es"
 
 
 def _js_runtime_args() -> list[str]:
@@ -148,6 +149,12 @@ def build_ytdl_download_command(
         dl_path,
         "-S",
         "vcodec:h264",
+        "--write-subs",
+        "--write-auto-subs",
+        "--sub-langs",
+        _DEFAULT_SUBTITLE_LANGS,
+        "--convert-subs",
+        "ass",
         "--compat-options",
         "filename-sanitization",
     ]

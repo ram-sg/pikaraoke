@@ -351,6 +351,14 @@ class TestBuildSongRecord:
         record = build_song_record(str(mp4))
         assert record["format"] == "ass"
 
+    def test_language_ass_detected(self, tmp_path):
+        mp4 = tmp_path / "Song---abc1234567x.mp4"
+        ass = tmp_path / "Song---abc1234567x.pt-BR.ass"
+        mp4.touch()
+        ass.touch()
+        record = build_song_record(str(mp4))
+        assert record["format"] == "ass"
+
     def test_zip_format(self, tmp_path):
         zf = tmp_path / "Song---abc1234567x.zip"
         zf.touch()

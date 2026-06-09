@@ -31,6 +31,7 @@ from biaoke.lib.network import get_ip
 from biaoke.lib.playback_controller import PlaybackController
 from biaoke.lib.preference_manager import PreferenceManager
 from biaoke.lib.queue_manager import QueueManager
+from biaoke.lib.song_guide import write_song_guide
 from biaoke.lib.song_manager import SongManager
 from biaoke.lib.youtube_dl import (
     get_search_results,
@@ -237,6 +238,7 @@ class Karaoke:
         self.events.on("song_ended", self.update_now_playing_socket)
         self.events.on("skip_requested", lambda: self.playback_controller.skip(False))
         self.events.on("song_downloaded", self.song_manager.register_download)
+        self.events.on("song_downloaded", self._build_song_guide)
         self.events.on(
             "sync_started",
             lambda: self.socketio.emit("sync_started", namespace="/") if self.socketio else None,
@@ -277,6 +279,29 @@ class Karaoke:
             logging.info("No existing database found, scanning song directory")
             result = self._scanner.scan(self.download_path)
             self._apply_scan_result(result)
+
+    def _build_song_guide(self, song_path: str) -> None:
+        """Start building the lightweight Biaoke guide package in the background."""
+        thread = threading.Thread(
+            target=self._build_song_guide_worker,
+            args=(song_path,),
+            daemon=True,
+        )
+        thread.start()
+
+    def _build_song_guide_worker(self, song_path: str) -> None:
+        """Build the lightweight Biaoke guide package for a downloaded song."""
+        try:
+            guide = write_song_guide(song_path)
+            lyrics = guide.get("lyrics", {})
+            logging.info(
+                "Biaoke guide built for %s: lyrics=%s lines=%s",
+                song_path,
+                lyrics.get("status"),
+                lyrics.get("line_count", 0),
+            )
+        except Exception as exc:
+            logging.warning("Failed to build Biaoke guide for %s: %s", song_path, exc)
 
     def _apply_scan_result(self, result: ScanResult) -> None:
         """Update SongList and emit notifications after a scan."""

@@ -136,6 +136,19 @@ class TestDelete:
         sm.delete(_native(song))
         assert not ass.exists()
 
+    def test_deletes_language_ass_and_guide_companions(self, tmp_path, mock_db):
+        song = tmp_path / "Test---abc.mp4"
+        ass = tmp_path / "Test---abc.pt-BR.ass"
+        guide = tmp_path / "Test---abc.biaoke-guide.json"
+        song.write_text("fake")
+        ass.write_text("fake")
+        guide.write_text("{}")
+        sm = SongManager(str(tmp_path), db=mock_db)
+        sm.songs.add_if_valid(_native(song))
+        sm.delete(_native(song))
+        assert not ass.exists()
+        assert not guide.exists()
+
     def test_nonexistent_file_no_error(self, tmp_path, mock_db):
         sm = SongManager(str(tmp_path), db=mock_db)
         sm.delete(_native(tmp_path / "nonexistent.mp4"))
@@ -172,6 +185,21 @@ class TestRename:
         sm.rename(_native(song), "New---abc")
         assert (tmp_path / "New---abc.ass").exists()
         assert not ass.exists()
+
+    def test_renames_language_ass_and_guide_companions(self, tmp_path, mock_db):
+        song = tmp_path / "Old---abc.mp4"
+        ass = tmp_path / "Old---abc.pt-BR.ass"
+        guide = tmp_path / "Old---abc.biaoke-guide.json"
+        song.write_text("fake")
+        ass.write_text("fake")
+        guide.write_text("{}")
+        sm = SongManager(str(tmp_path), db=mock_db)
+        sm.songs.add_if_valid(_native(song))
+        sm.rename(_native(song), "New---abc")
+        assert (tmp_path / "New---abc.pt-BR.ass").exists()
+        assert (tmp_path / "New---abc.biaoke-guide.json").exists()
+        assert not ass.exists()
+        assert not guide.exists()
 
     def test_returns_new_path(self, tmp_path, mock_db):
         song = tmp_path / "Old---abc.mp4"

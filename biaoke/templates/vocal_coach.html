@@ -3,6 +3,15 @@
   rel="stylesheet"
   href="{{ url_for('static', filename='vocal-coach.css', v=static_version) }}"
 />
+<script>
+  window.BiaokeCoachConfig = {
+    melodyUrl: "/score/melody/current",
+    lyricsUrl: "/score/lyrics/current",
+    lyricsOffsetUrl: "/score/lyrics-offset/current",
+    nowPlayingUrl: "/now_playing",
+  };
+</script>
+<script src="{{ url_for('static', filename='hls-1.6.15.min.js') }}"></script>
 <script src="{{ url_for('static', filename='vocal-coach.js', v=static_version) }}" defer></script>
 {% endblock %} {% block body %}
 <main class="coach-shell">
@@ -13,77 +22,155 @@
       <span class="coach-brand-mark">B</span>
       <span>
         <strong>Biaoke</strong>
-        <small>Vocal Coach</small>
+        <small>Treino vocal</small>
       </span>
     </a>
 
     <div class="coach-controls" aria-label="Vocal coach controls">
       <label>
-        <span>Mode</span>
+        <span>Modo</span>
         <select id="coach-preset">
-          <option value="free">Free</option>
-          <option value="sustain">Long notes</option>
-          <option value="scale">Scale</option>
-          <option value="intervals">Intervals</option>
+          <option value="free">Livre</option>
+          <option value="song" selected>Música atual</option>
+          <option value="sustain">Notas longas</option>
+          <option value="scale">Escala</option>
+          <option value="intervals">Intervalos</option>
         </select>
       </label>
 
       <label>
-        <span>Range</span>
+        <span>Região</span>
         <select id="coach-range">
-          <option value="low">Low</option>
-          <option value="mid" selected>Mid</option>
-          <option value="high">High</option>
+          <option value="low">Grave</option>
+          <option value="mid" selected>Média</option>
+          <option value="high">Aguda</option>
         </select>
       </label>
 
-      <button id="coach-reset" type="button" title="Reset session">Reset</button>
-      <button id="coach-fullscreen" type="button" title="Fullscreen">Full</button>
-      <button id="coach-start" class="is-primary" type="button">Start</button>
+      <div class="coach-sync-controls" aria-label="Sincronismo da legenda">
+        <span>Legenda</span>
+        <button id="coach-lyrics-earlier" type="button" title="Adiantar legenda">−</button>
+        <strong id="coach-lyrics-offset">0.0s</strong>
+        <button id="coach-lyrics-later" type="button" title="Atrasar legenda">+</button>
+        <button id="coach-lyrics-reset-sync" type="button" title="Zerar sincronismo">0</button>
+      </div>
+
+      <button id="coach-reset" type="button" title="Reiniciar sessão">Reiniciar</button>
+      <button id="coach-fullscreen" type="button" title="Tela cheia">Tela cheia</button>
+      <button id="coach-start" class="is-primary" type="button">Iniciar</button>
     </div>
   </header>
 
-  <section class="coach-stage" aria-label="Pitch training stage">
-    <canvas id="coach-canvas"></canvas>
+  <section class="coach-player-grid" aria-label="Karaoke coach stage">
+    <section class="coach-karaoke-stage" aria-label="Karaoke player">
+      <div id="coach-video-container" class="coach-video-container">
+        <div class="coach-performance-stage" aria-hidden="true">
+          <div class="coach-light-rig">
+            <i></i>
+            <i></i>
+            <i></i>
+            <i></i>
+          </div>
+          <div class="coach-note-road">
+            <i></i>
+            <i></i>
+            <i></i>
+            <i></i>
+          </div>
+        </div>
 
-    <div class="coach-live-readout" aria-live="polite">
-      <div>
-        <span id="coach-note">--</span>
-        <small id="coach-frequency">-- Hz</small>
+        <video
+          id="coach-video"
+          poster="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+          disableRemotePlayback
+          playsinline
+          webkit-playsinline
+        >
+          <source id="coach-video-source" src="" />
+        </video>
+
+        <div id="coach-idle" class="coach-idle">
+          <strong id="coach-idle-title">Biaoke</strong>
+          <span id="coach-idle-subtitle">Aguardando música</span>
+        </div>
+
+        <div class="coach-now-playing">
+          <div>
+            <span>Tocando agora</span>
+            <strong id="coach-now-playing-song">--</strong>
+            <small id="coach-now-playing-singer">--</small>
+          </div>
+          <div class="coach-clock">
+            <span id="coach-current">00:00</span>
+            <span id="coach-duration">/00:00</span>
+          </div>
+        </div>
+
+        <div id="coach-autoplay" class="coach-autoplay" hidden>
+          <button id="coach-autoplay-button" type="button">Ativar áudio e vídeo</button>
+        </div>
+
+        <div id="coach-lyrics-status" class="coach-lyrics-status">Aguardando letra</div>
+
+        <div class="coach-lyrics" aria-live="polite">
+          <div id="coach-lyrics-current" class="coach-lyrics-current"></div>
+          <div id="coach-lyrics-next" class="coach-lyrics-next"></div>
+        </div>
+
+        <div class="coach-song-progress" aria-hidden="true">
+          <i id="coach-song-progress-fill"></i>
+        </div>
       </div>
-      <div id="coach-cents" class="coach-cents">--</div>
-    </div>
 
-    <div class="coach-target-panel">
-      <span>Target</span>
-      <strong id="coach-target-note">--</strong>
-      <small id="coach-target-state">Free pitch</small>
-      <div class="coach-target-progress">
-        <i id="coach-target-progress-fill"></i>
+      <div id="coach-up-next" class="coach-up-next">
+        <span>Próxima</span>
+        <strong id="coach-up-next-song">--</strong>
+        <small id="coach-up-next-singer">--</small>
       </div>
-    </div>
+    </section>
 
-    <div class="coach-status" id="coach-status">Mic idle</div>
+    <section class="coach-stage" aria-label="Pitch training stage">
+      <canvas id="coach-canvas"></canvas>
+
+      <div class="coach-live-readout" aria-live="polite">
+        <div>
+          <span id="coach-note">--</span>
+          <small id="coach-frequency">-- Hz</small>
+        </div>
+        <div id="coach-cents" class="coach-cents">--</div>
+      </div>
+
+      <div class="coach-target-panel">
+        <span>Alvo</span>
+        <strong id="coach-target-note">--</strong>
+        <small id="coach-target-state">Afinação livre</small>
+        <div class="coach-target-progress">
+          <i id="coach-target-progress-fill"></i>
+        </div>
+      </div>
+
+      <div class="coach-status" id="coach-status">Microfone parado</div>
+    </section>
   </section>
 
   <section class="coach-metrics" aria-label="Session metrics">
     <article>
-      <span>Accuracy</span>
+      <span>Afinação</span>
       <strong id="coach-accuracy">--</strong>
       <div><i id="coach-accuracy-fill"></i></div>
     </article>
     <article>
-      <span>Timing</span>
+      <span>Entrada</span>
       <strong id="coach-timing">--</strong>
       <div><i id="coach-timing-fill"></i></div>
     </article>
     <article>
-      <span>Stability</span>
+      <span>Estabilidade</span>
       <strong id="coach-stability">--</strong>
       <div><i id="coach-stability-fill"></i></div>
     </article>
     <article>
-      <span>Coverage</span>
+      <span>Cobertura</span>
       <strong id="coach-coverage">--</strong>
       <div><i id="coach-coverage-fill"></i></div>
     </article>

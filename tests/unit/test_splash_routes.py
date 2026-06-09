@@ -116,6 +116,11 @@ class TestVocalCoachEndpoint:
         assert response.status_code == 200
         assert b"vocal-coach.css" in response.data
         assert b"vocal-coach.js" in response.data
+        assert b"hls-1.6.15.min.js" in response.data
+        assert b"/score/lyrics/current" in response.data
+        assert b'id="coach-video"' in response.data
+        assert b'id="coach-lyrics-current"' in response.data
+        assert b'id="coach-song-progress-fill"' in response.data
         assert b"Vocal Coach" in response.data
         mock_get_site_name.assert_called_once()
 

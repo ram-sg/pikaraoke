@@ -166,6 +166,21 @@ class TestBuildYtdlDownloadCommand:
         assert cmd[sort_idx] == "vcodec:h264"
 
     @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
+    def test_downloads_sidecar_subtitles(self, mock_js):
+        """Test that downloads request sidecar subtitles for coach lyrics."""
+        cmd = build_ytdl_download_command(
+            video_url="https://www.youtube.com/watch?v=test123",
+            download_path="/songs",
+        )
+
+        assert "--write-subs" in cmd
+        assert "--write-auto-subs" in cmd
+        assert "--sub-langs" in cmd
+        assert "pt.*,pt,en.*,en,es.*,es" in cmd
+        assert "--convert-subs" in cmd
+        assert cmd[cmd.index("--convert-subs") + 1] == "ass"
+
+    @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_url_is_last_argument(self, mock_js):
         """Test that video URL is always the last argument."""
         cmd = build_ytdl_download_command(

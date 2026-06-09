@@ -61,7 +61,10 @@ def _detect_format(file_path: str, files_lower: set[str]) -> str:
     base_lower = base.lower()
     if ext == ".mp3" and (base_lower + ".cdg") in files_lower:
         return "cdg"
-    if ext == ".mp4" and (base_lower + ".ass") in files_lower:
+    has_ass = (base_lower + ".ass") in files_lower or any(
+        name.startswith(base_lower + ".") and name.endswith(".ass") for name in files_lower
+    )
+    if ext == ".mp4" and has_ass:
         return "ass"
     return ext.lstrip(".")
 

@@ -1,11 +1,12 @@
 """Tests for real vocal scoring analysis."""
 
 import math
+import shutil
 import wave
 
 import pytest
 
-from biaoke.lib.scoring import ScoreAnalysisError, analyze_wav_file
+from biaoke.lib.scoring import ScoreAnalysisError, analyze_wav_file, extract_melody_guide_from_media
 
 
 def write_wav(path, samples, sample_rate=8000):
@@ -55,3 +56,17 @@ def test_rejects_too_short_recording(tmp_path):
 
     with pytest.raises(ScoreAnalysisError):
         analyze_wav_file(path, prefer_torchcrepe=False)
+
+
+def test_extracts_melody_guide_from_pitched_audio(tmp_path):
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed on this host")
+
+    path = tmp_path / "tone.wav"
+    write_wav(path, sine_wave(261.63, 2.0))
+
+    guide = extract_melody_guide_from_media(path, prefer_torchcrepe=False, max_seconds=5)
+
+    assert guide["status"] == "ready"
+    assert guide["notes"]
+    assert any(note["midi"] == 60 for note in guide["notes"])

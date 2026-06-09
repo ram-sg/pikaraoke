@@ -19,6 +19,8 @@ FRAME_SECONDS = 0.04
 HOP_SECONDS = 0.05
 MIN_SINGING_FREQUENCY = 70
 MAX_SINGING_FREQUENCY = 700
+DEFAULT_MAX_MELODY_SECONDS = 360
+NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 
 class ScoreAnalysisError(Exception):
@@ -106,12 +108,90 @@ def analyze_wav_file(path: str | os.PathLike, *, prefer_torchcrepe: bool = True)
     return _score_pitch_frames(frames, "autocorrelation", original_duration, analysis_duration)
 
 
+def extract_melody_guide_from_media(
+    path: str | os.PathLike,
+    *,
+    prefer_torchcrepe: bool = False,
+    ffmpeg_bin: str = "ffmpeg",
+    max_seconds: int | None = None,
+) -> dict:
+    """Extract a compact pitch guide from a media file.
+
+    This is a best-effort melody reference. For mixed or instrumental-heavy audio,
+    the detected line may follow the strongest pitched content rather than the lead vocal.
+    """
+    media_path = Path(path)
+    if not media_path.is_file():
+        raise ScoreAnalysisError("Song file not found")
+
+    with tempfile.TemporaryDirectory(prefix="biaoke-melody-") as tmp:
+        wav_path = Path(tmp) / "melody.wav"
+        _convert_to_analysis_wav(media_path, wav_path, ffmpeg_bin)
+        sample_rate, samples = _load_wav_mono(wav_path)
+
+    if len(samples) < sample_rate:
+        raise ScoreAnalysisError("Song file is too short to analyze")
+
+    original_duration = len(samples) / sample_rate
+    max_duration = max_seconds or _max_melody_seconds()
+    limited = False
+    max_samples = int(max_duration * sample_rate)
+    if len(samples) > max_samples:
+        samples = samples[:max_samples]
+        limited = True
+
+    if prefer_torchcrepe:
+        try:
+            frames = _extract_pitch_torchcrepe(samples, sample_rate)
+            engine = str(get_scoring_engine_status()["engine"])
+        except Exception:
+            frames = _extract_pitch_autocorrelation(samples, sample_rate)
+            engine = "autocorrelation"
+    else:
+        frames = _extract_pitch_autocorrelation(samples, sample_rate)
+        engine = "autocorrelation"
+
+    notes = _pitch_frames_to_melody_notes(frames)
+    voiced_frames = sum(1 for frame in frames if frame.voiced)
+    return {
+        "status": "ready",
+        "engine": engine,
+        "duration_seconds": round(original_duration, 2),
+        "analysis_duration_seconds": round(len(samples) / sample_rate, 2),
+        "limited": limited,
+        "voiced_ratio": round(voiced_frames / max(len(frames), 1), 4),
+        "notes": notes,
+        "warning": (
+            "Guia gerado automaticamente a partir do audio. "
+            "Em mixes densos, ele pode seguir outro instrumento em vez da voz principal."
+        ),
+    }
+
+
+def midi_to_frequency(midi: float) -> float:
+    return 440.0 * math.pow(2.0, (midi - 69.0) / 12.0)
+
+
+def midi_to_note_name(midi: int) -> str:
+    name = NOTE_NAMES[((midi % 12) + 12) % 12]
+    octave = math.floor(midi / 12) - 1
+    return f"{name}{octave}"
+
+
 def _max_analysis_seconds() -> int:
     raw_value = os.environ.get("BIAOKE_SCORE_MAX_ANALYSIS_SECONDS", "")
     try:
         return max(20, min(180, int(raw_value)))
     except (TypeError, ValueError):
         return DEFAULT_MAX_ANALYSIS_SECONDS
+
+
+def _max_melody_seconds() -> int:
+    raw_value = os.environ.get("BIAOKE_MELODY_MAX_SECONDS", "")
+    try:
+        return max(30, min(600, int(raw_value)))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_MELODY_SECONDS
 
 
 def _limit_samples_for_fast_analysis(samples: list[float], sample_rate: int) -> list[float]:
@@ -369,6 +449,79 @@ def _score_pitch_frames(
             "analysis_duration_seconds": round(analysis_duration, 2),
         },
     )
+
+
+def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, float | int | str]]:
+    min_segment_seconds = 0.16
+    max_merge_gap_seconds = 0.16
+    raw_segments: list[dict[str, float | int | str]] = []
+    active_note = None
+    start_time = 0.0
+    previous_time = 0.0
+    confidences: list[float] = []
+
+    def finish_segment(end_time: float) -> None:
+        nonlocal active_note, start_time, confidences
+        if active_note is None:
+            return
+        duration = end_time - start_time
+        if duration >= min_segment_seconds:
+            midi = int(active_note)
+            raw_segments.append(
+                {
+                    "start": round(start_time, 3),
+                    "end": round(end_time, 3),
+                    "midi": midi,
+                    "note": midi_to_note_name(midi),
+                    "frequency": round(midi_to_frequency(midi), 2),
+                    "confidence": round(statistics.mean(confidences) if confidences else 0.0, 4),
+                }
+            )
+        active_note = None
+        confidences = []
+
+    for frame in frames:
+        note = None
+        if frame.pitch_hz and frame.pitch_hz > 0 and frame.confidence >= 0.38:
+            midi_float = 69.0 + 12.0 * math.log2(frame.pitch_hz / 440.0)
+            if 36 <= midi_float <= 84:
+                note = int(round(midi_float))
+
+        if note is None:
+            finish_segment(previous_time + HOP_SECONDS)
+        elif active_note is None:
+            active_note = note
+            start_time = frame.time
+            confidences = [frame.confidence]
+        elif note == int(active_note):
+            confidences.append(frame.confidence)
+        else:
+            finish_segment(previous_time + HOP_SECONDS)
+            active_note = note
+            start_time = frame.time
+            confidences = [frame.confidence]
+        previous_time = frame.time
+
+    finish_segment(previous_time + HOP_SECONDS)
+
+    if not raw_segments:
+        return []
+
+    merged: list[dict[str, float | int | str]] = []
+    for segment in raw_segments:
+        if (
+            merged
+            and segment["midi"] == merged[-1]["midi"]
+            and float(segment["start"]) - float(merged[-1]["end"]) <= max_merge_gap_seconds
+        ):
+            previous_confidence = float(merged[-1]["confidence"])
+            current_confidence = float(segment["confidence"])
+            merged[-1]["end"] = segment["end"]
+            merged[-1]["confidence"] = round((previous_confidence + current_confidence) / 2.0, 4)
+        else:
+            merged.append(segment)
+
+    return [segment for segment in merged if float(segment["end"]) - float(segment["start"]) >= 0.2]
 
 
 def _pitch_range_cents(pitch_values: list[float]) -> float:
