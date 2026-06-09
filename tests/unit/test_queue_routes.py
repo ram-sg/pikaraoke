@@ -239,6 +239,30 @@ class TestQueueEditSocketUpdates:
 
     @patch("biaoke.routes.queue.is_admin", return_value=True)
     @patch("biaoke.routes.queue.get_karaoke_instance")
+    @patch("biaoke.routes.queue._", side_effect=lambda x: x)
+    def test_queue_edit_delete_file_removes_from_queue_and_library(
+        self,
+        mock_gettext,
+        mock_get_instance,
+        mock_is_admin,
+        client_with_session,
+        queue_env,
+    ):
+        """delete_file removes a queued problematic song and deletes its library file."""
+        qm, mock_karaoke, queue_updates, now_playing_updates = queue_env
+        qm.queue = [_make_queue_item(1), _make_queue_item(2)]
+        mock_get_instance.return_value = mock_karaoke
+
+        response = client_with_session.get("/queue/edit?action=delete_file&song=/songs/song1.mp4")
+
+        assert response.status_code == 302
+        assert [item["file"] for item in qm.queue] == ["/songs/song2.mp4"]
+        mock_karaoke.song_manager.delete.assert_called_once_with("/songs/song1.mp4")
+        assert len(queue_updates) == 1
+        assert len(now_playing_updates) == 1
+
+    @patch("biaoke.routes.queue.is_admin", return_value=True)
+    @patch("biaoke.routes.queue.get_karaoke_instance")
     def test_queue_reorder_drag_drop_emits_events(
         self, mock_get_instance, mock_is_admin, client_with_session, queue_env
     ):

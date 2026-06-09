@@ -358,7 +358,7 @@
       var url = "/queue/edit?song=" + encodeURIComponent(file) + "&action=" + action;
 
       // Track moved file for highlight (except delete)
-      if (action !== 'delete') {
+      if (action !== 'delete' && action !== 'delete_file') {
           window.highlightAfterRefresh = file;
       }
 
@@ -378,6 +378,19 @@
       });
 
       window.closeSongOptions();
+  };
+
+  window.executeDeleteFileAction = function() {
+      var title = window.currentSongOptions.title || '';
+      var msg = (window.translations && window.translations.confirmDeleteFromLibrary)
+          ? window.translations.confirmDeleteFromLibrary
+          : 'Are you sure you want to delete this song from the library?';
+      if (title) {
+          msg += "\n\n" + title;
+      }
+      if (window.confirm(msg)) {
+          window.executeQueueAction('delete_file');
+      }
   };
 
   // Open the modal menu
@@ -537,6 +550,10 @@
         <a id="opt-delete" class="panel-block py-3 has-text-danger" href="#" onclick="executeQueueAction('delete'); return false;">
             <span class="icon mr-2"><i class="icon-trash-empty"></i></span>
             {% trans %}Remove from Queue{% endtrans %}
+        </a>
+        <a id="opt-delete-file" class="panel-block py-3 has-text-danger" href="#" onclick="executeDeleteFileAction(); return false;">
+            <span class="icon mr-2"><i class="icon-cancel"></i></span>
+            Apagar da biblioteca
         </a>
     </section>
   </div>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from urllib.parse import unquote
 
 import flask_babel
@@ -145,6 +146,7 @@ def queue_edit(query):
             "up": _("Moved up in queue"),
             "down": _("Moved down in queue"),
             "delete": _("Deleted from queue"),
+            "delete_file": _("Deleted from library"),
         }
         error_labels = {
             "top": _("Error moving to top of queue"),
@@ -152,12 +154,21 @@ def queue_edit(query):
             "up": _("Error moving up in queue"),
             "down": _("Error moving down in queue"),
             "delete": _("Error deleting from queue"),
+            "delete_file": _("Error deleting from library"),
         }
 
         if action == "top":
             success = k.queue_manager.move_to_top(song)
         elif action == "bottom":
             success = k.queue_manager.move_to_bottom(song)
+        elif action == "delete_file":
+            success = k.queue_manager.queue_edit(song, "delete")
+            if success:
+                try:
+                    k.song_manager.delete(song)
+                except OSError as exc:
+                    logging.error("Error deleting queued song file %s: %s", song, exc)
+                    success = False
         else:
             success = k.queue_manager.queue_edit(song, action)
 

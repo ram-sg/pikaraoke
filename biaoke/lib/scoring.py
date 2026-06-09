@@ -472,7 +472,7 @@ def _score_pitch_frames(
 
 def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, float | int | str]]:
     min_segment_seconds = 0.16
-    max_merge_gap_seconds = 0.16
+    max_merge_gap_seconds = 0.36
     raw_segments: list[dict[str, float | int | str]] = []
     active_note = None
     start_time = 0.0

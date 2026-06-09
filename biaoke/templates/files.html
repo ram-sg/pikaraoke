@@ -143,8 +143,17 @@
 				><i class="icon icon-edit-1"></i>
 			</a>
 		</td>
-		{% endif %} {% endfor %}
+		<td style="padding-right: 0">
+			<a
+				class="confirm-delete-file has-text-danger"
+				href="{{url_for('files.delete_file')}}?song={{url_escape(song.encode('utf-8','surrogateescape'))}}&referrer={{url_escape(current_url)}}"
+				title="Delete song"
+				><i class="icon icon-trash-empty"></i>
+			</a>
+		</td>
+		{% endif %}
 	</tr>
+	{% endfor %}
 </table>
 
 {{ pagination.links }} {% endblock %}

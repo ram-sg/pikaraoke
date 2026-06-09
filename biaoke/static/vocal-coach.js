@@ -13,6 +13,12 @@
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
   const CONTOUR_TARGET_MAX_GAP_SECONDS = 0.34;
+  const VISUAL_PITCH_HOLD_MS = 420;
+  const VISUAL_MIN_MIDI = 36;
+  const VISUAL_MAX_MIDI = 84;
+  const VISUAL_TARGET_REJECT_CENTS = 520;
+  const VISUAL_STEP_REJECT_CENTS = 700;
+  const VISUAL_ARTIFACT_CONFIDENCE = 0.82;
   const DEFAULT_PITCH_BANDS_CENTS = [25, 40, 60, 80, 100, 130, 160, 200, 250, 320];
   const PITCH_BAND_STYLES = [
     { cents: 320, fill: "rgba(207, 77, 67, 0.045)" },
@@ -136,6 +142,8 @@
     lastLoadedSubtitleUrl: null,
     currentLyricsKey: null,
     latestPitchMidi: null,
+    latestPitchHeld: false,
+    lastAcceptedPitch: null,
   };
 
   const els = {};
@@ -256,6 +264,9 @@
     state.segmentFirstHitMs = null;
     state.history = [];
     state.recentErrors = [];
+    state.latestPitchMidi = null;
+    state.latestPitchHeld = false;
+    state.lastAcceptedPitch = null;
     state.metrics = emptyMetrics();
     updateMetricsDisplay(null);
   }
@@ -547,6 +558,38 @@
       confidence: clamp(1 - normalized[tau], 0, 1),
       rms,
     };
+  }
+
+  function centsBetweenMidi(sourceMidi, targetMidi) {
+    return (Number(sourceMidi) - Number(targetMidi)) * 100;
+  }
+
+  function heldVisualPitch(now) {
+    const last = state.lastAcceptedPitch;
+    if (!last || now - last.time > VISUAL_PITCH_HOLD_MS) return null;
+    return last.midi;
+  }
+
+  function acceptVisualPitch(pitchMidi, result, target, now) {
+    if (!Number.isFinite(pitchMidi) || pitchMidi < VISUAL_MIN_MIDI || pitchMidi > VISUAL_MAX_MIDI) {
+      return false;
+    }
+    if (!result || Number(result.confidence || 0) < TRAIL_MIN_CONFIDENCE) {
+      return false;
+    }
+
+    const targetDelta = target ? Math.abs(centsBetweenMidi(pitchMidi, target.midi)) : 0;
+    const previous = state.lastAcceptedPitch;
+    const previousAge = previous ? now - previous.time : Infinity;
+    const stepDelta = previous ? Math.abs(centsBetweenMidi(pitchMidi, previous.midi)) : 0;
+
+    if (target && targetDelta > VISUAL_TARGET_REJECT_CENTS && result.confidence < VISUAL_ARTIFACT_CONFIDENCE) {
+      return false;
+    }
+    if (previousAge <= VISUAL_PITCH_HOLD_MS && stepDelta > VISUAL_STEP_REJECT_CENTS && result.confidence < 0.88) {
+      return false;
+    }
+    return true;
   }
 
   async function readJsonResponse(response) {
@@ -1786,7 +1829,7 @@
     });
   }
 
-  function drawTargetPitchGraph(ctx, visibleNotes, xForTime, yForMidi, layout, songTime) {
+  function drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime) {
     let previous = null;
     ctx.save();
     ctx.lineCap = "round";
@@ -1799,36 +1842,58 @@
       const x1 = Math.max(-48, xForTime(start));
       const x2 = Math.min(layout.width + 48, xForTime(end));
       const y = clampRoadY(yForMidi(midi), layout);
+      const width = Math.max(4, x2 - x1);
+      const blockHeight = clamp(layout.roadHeight * 0.052, 18, 32);
+      const blockY = y - blockHeight / 2;
       const isCurrent = songTime >= start && songTime <= end;
       const isDone = songTime > end;
 
       if (previous && start - previous.end <= 1.35) {
-        ctx.strokeStyle = "rgba(246, 243, 234, 0.18)";
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(246, 243, 234, 0.16)";
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(previous.x, previous.y);
         ctx.lineTo(x1, y);
         ctx.stroke();
       }
 
-      ctx.strokeStyle = isCurrent
-        ? "rgba(246, 243, 234, 0.62)"
+      const outerTop = clampRoadY(yForMidi(midi + 2), layout);
+      const outerBottom = clampRoadY(yForMidi(midi - 2), layout);
+      const innerTop = clampRoadY(yForMidi(midi + 0.5), layout);
+      const innerBottom = clampRoadY(yForMidi(midi - 0.5), layout);
+
+      ctx.fillStyle = "rgba(237, 176, 73, 0.07)";
+      drawRoundRect(ctx, x1, Math.min(outerTop, outerBottom), width, Math.max(6, Math.abs(outerBottom - outerTop)), 10);
+      ctx.fill();
+
+      ctx.fillStyle = isCurrent ? "rgba(18, 199, 156, 0.24)" : "rgba(18, 199, 156, 0.12)";
+      drawRoundRect(ctx, x1, Math.min(innerTop, innerBottom), width, Math.max(4, Math.abs(innerBottom - innerTop)), 8);
+      ctx.fill();
+
+      ctx.fillStyle = isCurrent
+        ? "rgba(246, 243, 234, 0.94)"
         : isDone
-          ? "rgba(18, 199, 156, 0.22)"
-          : "rgba(155, 230, 214, 0.36)";
-      ctx.lineWidth = isCurrent ? 4 : 3;
-      ctx.beginPath();
-      ctx.moveTo(x1, y);
-      ctx.lineTo(x2, y);
+          ? "rgba(18, 199, 156, 0.36)"
+          : "rgba(155, 230, 214, 0.62)";
+      drawRoundRect(ctx, x1, blockY, width, blockHeight, Math.min(9, blockHeight / 2));
+      ctx.fill();
+
+      ctx.strokeStyle = isCurrent ? "rgba(3, 6, 10, 0.84)" : "rgba(246, 243, 234, 0.18)";
+      ctx.lineWidth = isCurrent ? 2 : 1;
+      drawRoundRect(ctx, x1, blockY, width, blockHeight, Math.min(9, blockHeight / 2));
       ctx.stroke();
 
       if (isCurrent) {
-        ctx.strokeStyle = "rgba(18, 199, 156, 0.96)";
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        ctx.moveTo(x1, y);
-        ctx.lineTo(clamp(xForTime(songTime), x1, x2), y);
-        ctx.stroke();
+        const doneWidth = Math.max(0, clamp(xForTime(songTime), x1, x2) - x1);
+        ctx.fillStyle = "rgba(18, 199, 156, 0.92)";
+        drawRoundRect(ctx, x1, blockY, doneWidth, blockHeight, Math.min(9, blockHeight / 2));
+        ctx.fill();
+      }
+
+      if (width > 54) {
+        ctx.fillStyle = isCurrent ? "rgba(3, 6, 10, 0.78)" : "rgba(3, 6, 10, 0.5)";
+        ctx.font = "800 12px sans-serif";
+        ctx.fillText(noteName(midi), x1 + 8, blockY + blockHeight - 8);
       }
 
       previous = { end, x: x2, y };
@@ -1888,7 +1953,7 @@
     return "rgba(207, 77, 67, 0.98)";
   }
 
-  function drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour) {
+  function drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour, songTime) {
     const points = state.history
       .filter(
         (point) =>
@@ -1903,28 +1968,22 @@
     if (points.length === 0) return;
 
     ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    for (let index = 1; index < points.length; index++) {
-      const previous = points[index - 1];
-      const point = points[index];
-      if (point.songTime - previous.songTime > 0.65) continue;
-      ctx.strokeStyle = trailColorForCents(point.cents);
-      ctx.lineWidth = 3.5;
+    points.forEach((point) => {
+      const age = Math.max(0, songTime - point.songTime);
+      const alpha = clamp(1 - age / Math.max(0.5, STAGE_ROAD_TRAIL_SECONDS), 0.14, 0.86);
+      const radius = clamp(7 - age * 1.4, 2.5, 7);
+      const x = xForTime(point.songTime);
+      const y = clampRoadY(yForMidi(point.midi), layout);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = trailColorForCents(point.cents);
+      ctx.strokeStyle = "rgba(3, 6, 10, 0.64)";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(xForTime(previous.songTime), clampRoadY(yForMidi(previous.midi), layout));
-      ctx.lineTo(xForTime(point.songTime), clampRoadY(yForMidi(point.midi), layout));
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
       ctx.stroke();
-    }
-
-    const latest = points[points.length - 1];
-    ctx.fillStyle = "rgba(246, 243, 234, 0.96)";
-    ctx.strokeStyle = "rgba(3, 6, 10, 0.72)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(xForTime(latest.songTime), clampRoadY(yForMidi(latest.midi), layout), 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 
@@ -1992,10 +2051,7 @@
     }
 
     const visibleNotes = visibleRoadNotes(notes, minTime, maxTime);
-    const visibleContour = visibleRoadContour(contour, minTime, maxTime);
-    drawPitchBandCorridors(ctx, visibleNotes, xForTime, yForMidi, layout);
-    drawTargetPitchGraph(ctx, visibleNotes, xForTime, yForMidi, layout, songTime);
-    drawReferenceVocalContour(ctx, visibleContour, notes, xForTime, yForMidi, layout);
+    drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime);
 
     ctx.strokeStyle = "rgba(246, 243, 234, 0.84)";
     ctx.lineWidth = 2;
@@ -2005,19 +2061,22 @@
     ctx.stroke();
     ctx.lineWidth = 1;
 
-    drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour);
+    drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour, songTime);
 
     if (Number.isFinite(pitchMidi)) {
       const livePoint = graphPitchPoint({ songTime, midi: pitchMidi, confidence: 1 }, notes, contour);
       if (livePoint) {
         const y = clampRoadY(yForMidi(livePoint.midi), layout);
+        const isHeld = Boolean(state.latestPitchHeld);
+        ctx.globalAlpha = isHeld ? 0.54 : 1;
         ctx.fillStyle = trailColorForCents(livePoint.cents);
         ctx.strokeStyle = "rgba(246, 243, 234, 0.98)";
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(hitX, y, 8, 0, Math.PI * 2);
+        ctx.arc(hitX, y, isHeld ? 6 : 8, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+        ctx.globalAlpha = 1;
         ctx.lineWidth = 1;
       }
     } else if (target) {
@@ -2174,29 +2233,51 @@
     const target = currentTarget(now);
 
     let pitchMidi = null;
+    let visualPitchMidi = null;
     let centsError = 0;
+    let effectiveResult = result;
     if (result.voiced) {
-      pitchMidi = frequencyToMidi(result.frequency);
-      if (target) {
-        centsError = 1200 * Math.log2(result.frequency / midiToFrequency(target.midi));
+      const detectedPitchMidi = frequencyToMidi(result.frequency);
+      const detectedCentsError = target
+        ? 1200 * Math.log2(result.frequency / midiToFrequency(target.midi))
+        : centsBetweenMidi(detectedPitchMidi, Math.round(detectedPitchMidi));
+      const accepted = acceptVisualPitch(detectedPitchMidi, result, target, now);
+      if (accepted) {
+        pitchMidi = detectedPitchMidi;
+        centsError = detectedCentsError;
+        visualPitchMidi = detectedPitchMidi;
+        state.lastAcceptedPitch = {
+          time: now,
+          midi: detectedPitchMidi,
+          songTime: selectedMode() === "song" ? songPlaybackTime(now) : null,
+          confidence: result.confidence,
+        };
+        state.history.push({
+          time: now,
+          midi: detectedPitchMidi,
+          confidence: result.confidence,
+          songTime: selectedMode() === "song" ? songPlaybackTime(now) : null,
+        });
       } else {
-        centsError = (pitchMidi - Math.round(pitchMidi)) * 100;
+        visualPitchMidi = heldVisualPitch(now);
+        effectiveResult = { ...result, voiced: false, filtered: true };
       }
-      state.latestPitchMidi = pitchMidi;
-      state.history.push({
-        time: now,
-        midi: pitchMidi,
-        confidence: result.confidence,
-        songTime: selectedMode() === "song" ? songPlaybackTime(now) : null,
-      });
     } else {
-      state.latestPitchMidi = null;
+      visualPitchMidi = heldVisualPitch(now);
     }
 
-    updateReadout(result, pitchMidi, target, centsError);
-    updateMetrics(result, pitchMidi, target, centsError, now);
+    if (visualPitchMidi !== null) {
+      state.latestPitchMidi = visualPitchMidi;
+      state.latestPitchHeld = pitchMidi === null;
+    } else {
+      state.latestPitchMidi = null;
+      state.latestPitchHeld = false;
+    }
+
+    updateReadout(effectiveResult, pitchMidi, target, centsError);
+    updateMetrics(effectiveResult, pitchMidi, target, centsError, now);
     draw(now, target, pitchMidi);
-    drawStageSongRoad(now, target, pitchMidi);
+    drawStageSongRoad(now, target, state.latestPitchMidi);
     state.rafId = requestAnimationFrame(tick);
   }
 
@@ -2274,6 +2355,8 @@
     state.analyser = null;
     state.timeData = null;
     state.latestPitchMidi = null;
+    state.latestPitchHeld = false;
+    state.lastAcceptedPitch = null;
     stopSongSync();
     els["coach-start"].textContent = TEXT.start;
     setStatus(TEXT.idle);
