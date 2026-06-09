@@ -134,15 +134,26 @@ class PlaybackController:
         logging.debug("Stream is playing")
         return result
 
-    def start_song(self) -> None:
+    def start_song(self, stream_url: str | None = None) -> bool:
         """Mark the current song as actively playing.
 
         Called by Flask route when client connects to stream.
         Idempotent - safe to call multiple times.
         """
+        if not self.now_playing or not self.now_playing_url:
+            logging.warning("Ignoring start_song event with no active song")
+            return False
+        if stream_url and stream_url != self.now_playing_url:
+            logging.warning(
+                "Ignoring start_song for stale stream: %s (current: %s)",
+                stream_url,
+                self.now_playing_url,
+            )
+            return False
         if not self.is_playing:
             logging.info(f"Song starting: {self.now_playing}")
             self.is_playing = True
+        return True
 
     def end_song(self, reason: str | None = None) -> None:
         """End the current song and clean up resources.

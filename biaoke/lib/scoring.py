@@ -152,6 +152,7 @@ def extract_melody_guide_from_media(
         engine = "autocorrelation"
 
     notes = _pitch_frames_to_melody_notes(frames)
+    contour = _pitch_frames_to_melody_contour(frames)
     voiced_frames = sum(1 for frame in frames if frame.voiced)
     return {
         "status": "ready",
@@ -161,6 +162,7 @@ def extract_melody_guide_from_media(
         "limited": limited,
         "voiced_ratio": round(voiced_frames / max(len(frames), 1), 4),
         "notes": notes,
+        "contour": contour,
         "warning": (
             "Guia gerado automaticamente a partir do audio. "
             "Em mixes densos, ele pode seguir outro instrumento em vez da voz principal."
@@ -522,6 +524,32 @@ def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, fl
             merged.append(segment)
 
     return [segment for segment in merged if float(segment["end"]) - float(segment["start"]) >= 0.2]
+
+
+def _pitch_frames_to_melody_contour(frames: list[PitchFrame]) -> list[dict[str, float]]:
+    points: list[dict[str, float]] = []
+    previous_time = -1.0
+    min_gap_seconds = 0.09
+
+    for frame in frames:
+        if not frame.pitch_hz or frame.pitch_hz <= 0 or frame.confidence < 0.38:
+            continue
+        if frame.time - previous_time < min_gap_seconds:
+            continue
+
+        midi = 69.0 + 12.0 * math.log2(frame.pitch_hz / 440.0)
+        if 36 <= midi <= 84:
+            points.append(
+                {
+                    "time": round(frame.time, 3),
+                    "midi": round(midi, 3),
+                    "frequency": round(frame.pitch_hz, 2),
+                    "confidence": round(frame.confidence, 4),
+                }
+            )
+            previous_time = frame.time
+
+    return points
 
 
 def _pitch_range_cents(pitch_values: list[float]) -> float:

@@ -29,10 +29,11 @@ def setup_socket_events(socketio):
         k.playback_controller.end_song(reason)
 
     @socketio.on("start_song")
-    def start_song() -> None:
+    def start_song(payload=None) -> None:
         """Handle start_song WebSocket event when playback begins."""
+        payload = payload or {}
         k = get_karaoke_instance()
-        k.playback_controller.start_song()
+        k.playback_controller.start_song(stream_url=payload.get("stream_url"))
 
     @socketio.on("clear_notification")
     def clear_notification() -> None:

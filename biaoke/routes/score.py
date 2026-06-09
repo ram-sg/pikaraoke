@@ -361,8 +361,9 @@ def _get_cached_melody_guide(path: Path) -> dict:
 
 
 def _transpose_guide(guide: dict, semitones: int) -> dict:
+    contour = [dict(point) for point in guide.get("contour", [])]
     if semitones == 0:
-        return {**guide, "notes": [dict(note) for note in guide.get("notes", [])]}
+        return {**guide, "notes": [dict(note) for note in guide.get("notes", [])], "contour": contour}
 
     notes = []
     for note in guide.get("notes", []):
@@ -372,7 +373,19 @@ def _transpose_guide(guide: dict, semitones: int) -> dict:
         transposed["note"] = midi_to_note_name(midi)
         transposed["frequency"] = round(midi_to_frequency(midi), 2)
         notes.append(transposed)
-    return {**guide, "notes": notes}
+
+    transposed_contour = []
+    for point in contour:
+        try:
+            midi = float(point["midi"]) + semitones
+        except (KeyError, TypeError, ValueError):
+            transposed_contour.append(point)
+            continue
+        point["midi"] = round(midi, 3)
+        point["frequency"] = round(midi_to_frequency(midi), 2)
+        transposed_contour.append(point)
+
+    return {**guide, "notes": notes, "contour": transposed_contour}
 
 
 def _analyze_with_service(

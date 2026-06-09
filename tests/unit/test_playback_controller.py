@@ -217,10 +217,33 @@ class TestPlaybackControllerStartSong:
 
         pc = PlaybackController(test_prefs, events, filename_fn)
         pc.now_playing = "Test Song"
+        pc.now_playing_url = "/stream/123.m3u8"
 
-        pc.start_song()
+        assert pc.start_song() is True
 
         assert pc.is_playing is True
+
+    def test_start_song_ignores_missing_active_song(self, test_prefs):
+        """A stale client event must not mark playback active without a song."""
+        events = EventSystem()
+        filename_fn = lambda x, remove_youtube_id=True: x
+
+        pc = PlaybackController(test_prefs, events, filename_fn)
+
+        assert pc.start_song() is False
+        assert pc.is_playing is False
+
+    def test_start_song_ignores_stale_stream_url(self, test_prefs):
+        """A delayed start event for an old stream must not start the current state."""
+        events = EventSystem()
+        filename_fn = lambda x, remove_youtube_id=True: x
+
+        pc = PlaybackController(test_prefs, events, filename_fn)
+        pc.now_playing = "Test Song"
+        pc.now_playing_url = "/stream/current.m3u8"
+
+        assert pc.start_song(stream_url="/stream/old.m3u8") is False
+        assert pc.is_playing is False
 
 
 class TestPlaybackControllerEndSong:

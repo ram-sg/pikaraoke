@@ -5,6 +5,7 @@
 />
 <script>
   window.BiaokeCoachConfig = {
+    guideUrl: "/score/guide/current",
     melodyUrl: "/score/melody/current",
     lyricsUrl: "/score/lyrics/current",
     lyricsOffsetUrl: "/score/lyrics-offset/current",
@@ -25,6 +26,18 @@
         <small>Treino vocal</small>
       </span>
     </a>
+
+    <div class="coach-now-playing">
+      <div>
+        <span>Tocando agora</span>
+        <strong id="coach-now-playing-song">--</strong>
+        <small id="coach-now-playing-singer">--</small>
+      </div>
+      <div class="coach-clock">
+        <span id="coach-current">00:00</span>
+        <span id="coach-duration">/00:00</span>
+      </div>
+    </div>
 
     <div class="coach-controls" aria-label="Vocal coach controls">
       <label>
@@ -79,9 +92,15 @@
           </div>
         </div>
 
+        <canvas id="coach-song-road" class="coach-song-road" aria-hidden="true"></canvas>
+
+        <audio id="coach-audio" preload="auto"></audio>
+
         <video
           id="coach-video"
           poster="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+          hidden
+          aria-hidden="true"
           disableRemotePlayback
           playsinline
           webkit-playsinline
@@ -94,20 +113,8 @@
           <span id="coach-idle-subtitle">Aguardando música</span>
         </div>
 
-        <div class="coach-now-playing">
-          <div>
-            <span>Tocando agora</span>
-            <strong id="coach-now-playing-song">--</strong>
-            <small id="coach-now-playing-singer">--</small>
-          </div>
-          <div class="coach-clock">
-            <span id="coach-current">00:00</span>
-            <span id="coach-duration">/00:00</span>
-          </div>
-        </div>
-
         <div id="coach-autoplay" class="coach-autoplay" hidden>
-          <button id="coach-autoplay-button" type="button">Ativar áudio e vídeo</button>
+          <button id="coach-autoplay-button" type="button">Ativar áudio</button>
         </div>
 
         <div id="coach-lyrics-status" class="coach-lyrics-status">Aguardando letra</div>
@@ -153,27 +160,5 @@
     </section>
   </section>
 
-  <section class="coach-metrics" aria-label="Session metrics">
-    <article>
-      <span>Afinação</span>
-      <strong id="coach-accuracy">--</strong>
-      <div><i id="coach-accuracy-fill"></i></div>
-    </article>
-    <article>
-      <span>Entrada</span>
-      <strong id="coach-timing">--</strong>
-      <div><i id="coach-timing-fill"></i></div>
-    </article>
-    <article>
-      <span>Estabilidade</span>
-      <strong id="coach-stability">--</strong>
-      <div><i id="coach-stability-fill"></i></div>
-    </article>
-    <article>
-      <span>Cobertura</span>
-      <strong id="coach-coverage">--</strong>
-      <div><i id="coach-coverage-fill"></i></div>
-    </article>
-  </section>
 </main>
 {% endblock %}

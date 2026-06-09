@@ -679,7 +679,12 @@ const setupVideoPlayer = () => {
     await startMicMonitor();
     startScoreCapture();
     if (isMaster) {
-      setTimeout(() => { socket.emit("start_song") }, 1200);
+      const streamUrl = currentVideoUrl;
+      setTimeout(() => {
+        if (streamUrl && currentVideoUrl === streamUrl && isMediaPlaying(video)) {
+          socket.emit("start_song", { stream_url: streamUrl });
+        }
+      }, 1200);
     }
   });
 

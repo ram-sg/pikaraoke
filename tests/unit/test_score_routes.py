@@ -214,6 +214,7 @@ def test_current_melody_guide_returns_transposed_notes(tmp_path):
         "engine": "test",
         "duration_seconds": 30,
         "notes": [{"start": 1.0, "end": 2.0, "midi": 60, "note": "C4", "frequency": 261.63}],
+        "contour": [{"time": 1.0, "midi": 60.125, "frequency": 263.53, "confidence": 0.9}],
     }
 
     with patch("biaoke.routes.score.extract_melody_guide_from_media", return_value=fake_guide):
@@ -227,6 +228,7 @@ def test_current_melody_guide_returns_transposed_notes(tmp_path):
     assert data["transpose"] == 2
     assert data["notes"][0]["midi"] == 62
     assert data["notes"][0]["note"] == "D4"
+    assert data["contour"][0]["midi"] == 62.125
 
 
 def test_current_routes_use_prepared_coach_package_for_playing_stem(tmp_path):

@@ -14,7 +14,7 @@ body {
   background-position: center;
   background-size: cover;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
   padding: 18px;
 }
@@ -28,15 +28,14 @@ body {
     linear-gradient(0deg, rgba(0, 0, 0, 0.32), transparent 44%);
 }
 
-.coach-topbar,
-.coach-metrics {
+.coach-topbar {
   position: relative;
   z-index: 2;
 }
 
 .coach-topbar {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
   align-items: center;
   gap: 16px;
   min-height: 56px;
@@ -88,6 +87,7 @@ body {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .coach-controls label {
@@ -174,7 +174,7 @@ body {
   z-index: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -188,19 +188,21 @@ body {
 
 .coach-video-container {
   position: relative;
+  height: 100%;
   min-height: 420px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: #000;
   overflow: hidden;
 }
 
-#coach-video {
+#coach-video,
+#coach-audio {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   min-height: 420px;
-  display: block;
+  display: none;
   background: #000;
   object-fit: contain;
   opacity: 0;
@@ -277,6 +279,16 @@ body {
   border-right: 1px solid rgba(155, 230, 214, 0.2);
 }
 
+.coach-song-road {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 1;
+}
+
 .coach-idle {
   position: absolute;
   inset: 0;
@@ -311,26 +323,25 @@ body {
 }
 
 .coach-now-playing {
-  position: absolute;
-  top: 14px;
-  left: 14px;
-  right: 14px;
-  z-index: 4;
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 16px;
-  pointer-events: none;
+  gap: 8px;
+  min-width: 0;
 }
 
 .coach-now-playing > div:first-child,
 .coach-clock,
 .coach-up-next {
-  max-width: min(720px, 80%);
   padding: 10px 12px;
   background: rgba(2, 5, 8, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(10px);
+}
+
+.coach-now-playing > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .coach-now-playing span,
@@ -345,7 +356,7 @@ body {
 .coach-up-next strong {
   display: block;
   color: #f8f7ef;
-  font-size: clamp(18px, 2.1vw, 30px);
+  font-size: clamp(15px, 1.5vw, 22px);
   line-height: 1.1;
   overflow-wrap: anywhere;
 }
@@ -358,8 +369,11 @@ body {
 }
 
 .coach-clock {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   color: #f8f7ef;
-  font-size: clamp(16px, 2vw, 26px);
+  font-size: clamp(15px, 1.5vw, 22px);
   font-weight: 800;
   white-space: nowrap;
 }
@@ -503,13 +517,7 @@ body {
 }
 
 .coach-stage {
-  position: relative;
-  z-index: 1;
-  min-width: 0;
-  min-height: 420px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(3, 6, 10, 0.76);
-  overflow: hidden;
+  display: none;
 }
 
 #coach-canvas {
@@ -585,8 +593,7 @@ body {
   margin: 6px 0;
 }
 
-.coach-target-progress,
-.coach-metrics article div {
+.coach-target-progress {
   height: 5px;
   background: rgba(255, 255, 255, 0.16);
   overflow: hidden;
@@ -596,8 +603,7 @@ body {
   margin-top: 12px;
 }
 
-.coach-target-progress i,
-.coach-metrics article div i {
+.coach-target-progress i {
   display: block;
   width: 0%;
   height: 100%;
@@ -633,33 +639,6 @@ body {
   border-color: #cf4d43;
 }
 
-.coach-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.coach-metrics article {
-  min-height: 74px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(5, 9, 14, 0.77);
-}
-
-.coach-metrics article span {
-  color: #aebbb6;
-  display: block;
-  font-size: 12px;
-  text-transform: uppercase;
-}
-
-.coach-metrics article strong {
-  display: block;
-  font-size: clamp(22px, 3vw, 36px);
-  line-height: 1.1;
-  margin: 5px 0 9px;
-}
-
 @media screen and (max-width: 760px) {
   body {
     overflow: auto;
@@ -673,7 +652,7 @@ body {
 
   .coach-topbar {
     align-items: flex-start;
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .coach-controls {
@@ -691,10 +670,8 @@ body {
   }
 
   .coach-now-playing {
-    top: 10px;
-    left: 10px;
-    right: 10px;
     gap: 8px;
+    width: 100%;
   }
 
   .coach-now-playing > div:first-child,
@@ -706,10 +683,6 @@ body {
 
   .coach-lyrics {
     padding: 54px 12px 28px;
-  }
-
-  .coach-stage {
-    min-height: 52svh;
   }
 
   .coach-live-readout {
@@ -726,9 +699,5 @@ body {
   .coach-status {
     top: auto;
     bottom: 112px;
-  }
-
-  .coach-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

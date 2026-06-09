@@ -69,4 +69,6 @@ def test_extracts_melody_guide_from_pitched_audio(tmp_path):
 
     assert guide["status"] == "ready"
     assert guide["notes"]
+    assert guide["contour"]
     assert any(note["midi"] == 60 for note in guide["notes"])
+    assert any(59.5 <= point["midi"] <= 60.5 for point in guide["contour"])
