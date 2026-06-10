@@ -144,6 +144,27 @@ ALIGNMENT_ONSET_STOP_WORDS = {
     "you",
     "your",
 }
+VOCAL_UNIT_SCHEMA = "biaoke.vocal_units"
+VOCAL_UNIT_VERSION = 2
+VOCAL_UNIT_MIN_WORD_SECONDS = 0.08
+VOCAL_UNIT_MIN_CLUSTER_SECONDS = 0.035
+VOCAL_UNIT_SUSTAIN_MIN_SECONDS = 0.32
+VOCAL_UNIT_PITCH_MIN_OVERLAP_SECONDS = 0.08
+VOCAL_UNIT_NOTE_ALIGN_EXTENSION_SECONDS = 0.35
+VOCAL_UNIT_NOTE_ALIGN_MIN_CONFIDENCE = 0.5
+VOCAL_UNIT_NOTE_ALIGN_MERGE_GAP_SECONDS = 0.22
+VOCAL_UNIT_VOWELS = set(
+    "aeiouAEIOU"
+    "áàâãäåÁÀÂÃÄÅ"
+    "éèêëÉÈÊË"
+    "íìîïÍÌÎÏ"
+    "óòôõöÓÒÔÕÖ"
+    "úùûüÚÙÛÜ"
+    "ýÿÝŸ"
+)
+VOCAL_UNIT_SONORANTS = set("mnlrMNLR")
+VOCAL_UNIT_FRICATIVE_DIGRAPHS = {"sh", "ch", "th", "ph", "gh", "zh"}
+VOCAL_UNIT_FRICATIVES = set("sfvzjxçhSFVZJXÇH")
 
 
 class CoachPreparationManager:
@@ -803,6 +824,7 @@ def _write_coach_guide(
         lyrics["alignment"] = _adjust_first_word_onsets_with_melody(lyrics["alignment"], reference_melody)
     lyrics = _augment_lyrics_with_transcript_vocalizations(lyrics, transcript, reference_melody)
     lyrics = _sort_lyrics_lines_and_remap_alignment(lyrics)
+    lyrics = _attach_vocal_units(lyrics, reference_melody)
     quality_lyrics_guide = {"lyrics": lyrics}
     payload = {
         "schema": COACH_GUIDE_SCHEMA,
@@ -832,6 +854,474 @@ def _write_coach_guide(
         handle.write("\n")
     os.replace(tmp_path, path)
     return path
+
+
+def _attach_vocal_units(lyrics: dict[str, Any], melody_guide: dict[str, Any]) -> dict[str, Any]:
+    """Add orthographic vocal sub-units used by the coach renderer.
+
+    This is intentionally language-light. It does not try to infer a full
+    phonetic transcription; it marks where the visual paint should linger:
+    vowels first, then sustained sonorants, with fricatives as timing-only
+    effects.
+    """
+    if not isinstance(lyrics, dict):
+        return lyrics
+    alignment = lyrics.get("alignment") if isinstance(lyrics.get("alignment"), dict) else None
+    raw_units = (
+        alignment.get("paint_units")
+        if isinstance(alignment, dict) and isinstance(alignment.get("paint_units"), list)
+        else []
+    )
+    alignment_granularity = str(alignment.get("granularity") or "").lower() if isinstance(alignment, dict) else ""
+    if not raw_units:
+        return lyrics
+
+    vocal_units = []
+    for raw_unit in raw_units:
+        if not isinstance(raw_unit, dict):
+            continue
+        default_unit_type = "word" if alignment_granularity in {"word", "segment"} else "line"
+        unit_type = str(raw_unit.get("unit_type") or default_unit_type).lower()
+        if unit_type not in {"word", "segment"}:
+            continue
+        start = _safe_float(raw_unit.get("start"))
+        end = _safe_float(raw_unit.get("end"))
+        text = str(raw_unit.get("text") or "").strip()
+        if start is None or end is None or end - start < VOCAL_UNIT_MIN_WORD_SECONDS or not text:
+            continue
+
+        line_index = _safe_int(raw_unit.get("line_index"), default=0)
+        unit_index = _safe_int(raw_unit.get("unit_index"), default=len(vocal_units))
+        sub_units = _vocal_sub_units_for_text(
+            text,
+            start,
+            end,
+            melody_guide,
+            line_index=line_index,
+            unit_index=unit_index,
+        )
+        if not sub_units:
+            continue
+        unit_start = min([start, *(_safe_float(sub_unit.get("start")) or start for sub_unit in sub_units)])
+        unit_end = max([end, *(_safe_float(sub_unit.get("end")) or end for sub_unit in sub_units)])
+        vocal_units.append(
+            {
+                "text": text,
+                "start": round(unit_start, 3),
+                "end": round(unit_end, 3),
+                "line_index": line_index,
+                "unit_index": unit_index,
+                "unit_type": unit_type,
+                "precision": str(raw_unit.get("precision") or unit_type),
+                "sub_units": sub_units,
+            }
+        )
+
+    enriched = dict(lyrics)
+    enriched["vocal_units_schema"] = VOCAL_UNIT_SCHEMA
+    enriched["vocal_units_version"] = VOCAL_UNIT_VERSION
+    enriched["vocal_units"] = vocal_units
+    return enriched
+
+
+def _vocal_sub_units_for_text(
+    text: str,
+    start: float,
+    end: float,
+    melody_guide: dict[str, Any],
+    *,
+    line_index: int,
+    unit_index: int,
+) -> list[dict[str, Any]]:
+    clusters = _vocal_sound_clusters(text)
+    if not clusters:
+        return []
+    durations = _allocate_vocal_cluster_durations(clusters, end - start)
+    if not durations:
+        return []
+
+    intervals = []
+    cursor = start
+    for sub_index, (cluster, duration) in enumerate(zip(clusters, durations, strict=False)):
+        sub_start = cursor
+        sub_end = end if sub_index == len(durations) - 1 else min(end, cursor + duration)
+        cursor = sub_end
+        if duration < VOCAL_UNIT_MIN_CLUSTER_SECONDS:
+            continue
+        if sub_end <= sub_start:
+            continue
+        intervals.append({"cluster": cluster, "start": sub_start, "end": sub_end})
+
+    intervals = _align_vocal_intervals_to_notes(intervals, start, end, melody_guide)
+
+    sub_units = []
+    for interval in intervals:
+        cluster = interval["cluster"]
+        sub_start = float(interval["start"])
+        sub_end = float(interval["end"])
+        duration_seconds = sub_end - sub_start
+        if duration_seconds < VOCAL_UNIT_MIN_CLUSTER_SECONDS:
+            continue
+        note_stats = _vocal_unit_note_stats(sub_start, sub_end, melody_guide)
+        kind = str(cluster["type"])
+        pitch_overlap = float(note_stats.get("overlap_seconds") or 0.0)
+        has_pitch = pitch_overlap >= min(VOCAL_UNIT_PITCH_MIN_OVERLAP_SECONDS, duration_seconds * 0.35)
+        sub_units.append(
+            {
+                "text": str(cluster["text"]),
+                "display_text": _vocal_unit_display_text(str(cluster["text"])),
+                "type": kind,
+                "score": _vocal_unit_score_kind(kind, has_pitch),
+                "start": round(sub_start, 3),
+                "end": round(sub_end, 3),
+                "duration": round(duration_seconds, 3),
+                "char_start": _safe_int(cluster.get("char_start"), default=0),
+                "char_end": _safe_int(cluster.get("char_end"), default=len(str(cluster["text"]))),
+                "line_index": line_index,
+                "unit_index": unit_index,
+                "sub_index": len(sub_units),
+                "sustain": bool(
+                    kind in {"vowel_sustain", "sonorant_sustain", "fricative_effect"}
+                    and duration_seconds >= VOCAL_UNIT_SUSTAIN_MIN_SECONDS
+                ),
+                "note_count": int(note_stats.get("note_count") or 0),
+                "midi_min": note_stats.get("midi_min"),
+                "midi_max": note_stats.get("midi_max"),
+                "pitch_overlap": round(pitch_overlap, 3),
+            }
+        )
+    return sub_units
+
+
+def _vocal_sound_clusters(text: str) -> list[dict[str, str]]:
+    chars = list(str(text or "").strip())
+    if not chars:
+        return []
+    has_regular_vowel = any(_is_regular_vowel_char(char) for char in chars)
+    clusters: list[dict[str, str]] = []
+    index = 0
+    while index < len(chars):
+        char = chars[index]
+        if char.isspace():
+            index += 1
+            continue
+        if _is_vowel_char(char, treat_y=not has_regular_vowel):
+            end_index = index + 1
+            while end_index < len(chars) and _is_vowel_char(chars[end_index], treat_y=not has_regular_vowel):
+                end_index += 1
+            clusters.append(
+                {
+                    "text": "".join(chars[index:end_index]),
+                    "type": "vowel_sustain",
+                    "char_start": index,
+                    "char_end": end_index,
+                }
+            )
+            index = end_index
+            continue
+        if char in VOCAL_UNIT_SONORANTS:
+            end_index = index + 1
+            while end_index < len(chars) and chars[end_index] in VOCAL_UNIT_SONORANTS:
+                end_index += 1
+            clusters.append(
+                {
+                    "text": "".join(chars[index:end_index]),
+                    "type": "sonorant_sustain",
+                    "char_start": index,
+                    "char_end": end_index,
+                }
+            )
+            index = end_index
+            continue
+        fricative_length = _fricative_cluster_length(chars, index)
+        if fricative_length:
+            clusters.append(
+                {
+                    "text": "".join(chars[index : index + fricative_length]),
+                    "type": "fricative_effect",
+                    "char_start": index,
+                    "char_end": index + fricative_length,
+                }
+            )
+            index += fricative_length
+            continue
+        if char.isalpha() or char.isdigit():
+            end_index = index + 1
+            while (
+                end_index < len(chars)
+                and not chars[end_index].isspace()
+                and not _is_vowel_char(chars[end_index], treat_y=not has_regular_vowel)
+                and chars[end_index] not in VOCAL_UNIT_SONORANTS
+                and not _fricative_cluster_length(chars, end_index)
+            ):
+                end_index += 1
+            clusters.append(
+                {
+                    "text": "".join(chars[index:end_index]),
+                    "type": "consonant",
+                    "char_start": index,
+                    "char_end": end_index,
+                }
+            )
+            index = end_index
+            continue
+        clusters.append({"text": char, "type": "consonant", "char_start": index, "char_end": index + 1})
+        index += 1
+
+    return _classify_vocal_consonant_edges(clusters)
+
+
+def _align_vocal_intervals_to_notes(
+    intervals: list[dict[str, Any]],
+    start: float,
+    end: float,
+    melody_guide: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not intervals:
+        return intervals
+    sustain_indexes = [
+        index
+        for index, interval in enumerate(intervals)
+        if interval.get("cluster", {}).get("type") in {"vowel_sustain", "sonorant_sustain"}
+    ]
+    if not sustain_indexes:
+        return intervals
+
+    note_windows = _vocal_note_windows_for_span(start, end, melody_guide)
+    if not note_windows:
+        return intervals
+
+    first_sustain = sustain_indexes[0]
+    last_sustain = sustain_indexes[-1]
+    pre_duration = sum(max(0.0, intervals[index]["end"] - intervals[index]["start"]) for index in range(first_sustain))
+    post_duration = sum(
+        max(0.0, intervals[index]["end"] - intervals[index]["start"])
+        for index in range(last_sustain + 1, len(intervals))
+    )
+    note_start = min(window_start for window_start, _ in note_windows)
+    note_end = max(window_end for _, window_end in note_windows)
+
+    sustain_start = max(start + min(pre_duration, end - start), note_start)
+    sustain_end = max(note_end, intervals[last_sustain]["end"])
+    sustain_end = min(sustain_end, end + VOCAL_UNIT_NOTE_ALIGN_EXTENSION_SECONDS)
+    if sustain_end <= sustain_start + VOCAL_UNIT_MIN_CLUSTER_SECONDS:
+        return intervals
+
+    adjusted = [dict(interval) for interval in intervals]
+    cursor = start
+    for index in range(first_sustain):
+        duration = max(0.0, intervals[index]["end"] - intervals[index]["start"])
+        next_cursor = min(sustain_start, cursor + duration)
+        adjusted[index]["start"] = cursor
+        adjusted[index]["end"] = max(cursor + VOCAL_UNIT_MIN_CLUSTER_SECONDS, next_cursor)
+        cursor = adjusted[index]["end"]
+
+    middle_indexes = list(range(first_sustain, last_sustain + 1))
+    middle_duration = sustain_end - sustain_start
+    middle_fixed_durations = {
+        index: min(0.18, max(0.0, intervals[index]["end"] - intervals[index]["start"]))
+        for index in middle_indexes
+        if adjusted[index].get("cluster", {}).get("type") not in {"vowel_sustain", "sonorant_sustain"}
+    }
+    middle_sustain_indexes = [index for index in middle_indexes if index not in middle_fixed_durations]
+    fixed_duration = min(sum(middle_fixed_durations.values()), max(0.0, middle_duration * 0.35))
+    sustain_duration = max(VOCAL_UNIT_MIN_CLUSTER_SECONDS * len(middle_sustain_indexes), middle_duration - fixed_duration)
+    sustain_weight_by_index = {
+        index: _vocal_cluster_weight(adjusted[index]["cluster"]) for index in middle_sustain_indexes
+    }
+    sustain_weight_sum = sum(sustain_weight_by_index.values()) or float(len(middle_sustain_indexes) or 1)
+    cursor = sustain_start
+    for position, index in enumerate(middle_indexes):
+        if index in middle_fixed_durations:
+            duration = middle_fixed_durations[index]
+        else:
+            duration = sustain_duration * (sustain_weight_by_index.get(index, 1.0) / sustain_weight_sum)
+        next_cursor = sustain_end if position == len(middle_indexes) - 1 else cursor + duration
+        adjusted[index]["start"] = cursor
+        adjusted[index]["end"] = max(cursor + VOCAL_UNIT_MIN_CLUSTER_SECONDS, next_cursor)
+        cursor = adjusted[index]["end"]
+
+    cursor = sustain_end
+    max_post_end = max(end, sustain_end + post_duration)
+    max_post_end = min(max_post_end, end + VOCAL_UNIT_NOTE_ALIGN_EXTENSION_SECONDS)
+    for index in range(last_sustain + 1, len(adjusted)):
+        duration = max(0.0, intervals[index]["end"] - intervals[index]["start"])
+        next_cursor = min(max_post_end, cursor + duration)
+        adjusted[index]["start"] = cursor
+        adjusted[index]["end"] = max(cursor + VOCAL_UNIT_MIN_CLUSTER_SECONDS, next_cursor)
+        cursor = adjusted[index]["end"]
+
+    return [
+        interval
+        for interval in adjusted
+        if _safe_float(interval.get("end")) is not None
+        and _safe_float(interval.get("start")) is not None
+        and float(interval["end"]) > float(interval["start"])
+    ]
+
+
+def _vocal_note_windows_for_span(
+    start: float,
+    end: float,
+    melody_guide: dict[str, Any],
+) -> list[tuple[float, float]]:
+    windows = []
+    extended_end = end + VOCAL_UNIT_NOTE_ALIGN_EXTENSION_SECONDS
+    for note in melody_guide.get("notes") or []:
+        if not isinstance(note, dict):
+            continue
+        note_start = _safe_float(note.get("start"))
+        note_end = _safe_float(note.get("end"))
+        confidence = _safe_float(note.get("confidence"))
+        if (
+            note_start is None
+            or note_end is None
+            or note_end <= start
+            or note_start >= extended_end
+            or (confidence is not None and confidence < VOCAL_UNIT_NOTE_ALIGN_MIN_CONFIDENCE)
+        ):
+            continue
+        windows.append((max(start, note_start), min(extended_end, note_end)))
+    if not windows:
+        return []
+    return _merge_time_windows(windows, VOCAL_UNIT_NOTE_ALIGN_MERGE_GAP_SECONDS)
+
+
+def _classify_vocal_consonant_edges(clusters: list[dict[str, str]]) -> list[dict[str, str]]:
+    pitch_indexes = [
+        index
+        for index, cluster in enumerate(clusters)
+        if cluster.get("type") in {"vowel_sustain", "sonorant_sustain"}
+    ]
+    if not pitch_indexes:
+        return clusters
+    first_pitch = pitch_indexes[0]
+    last_pitch = pitch_indexes[-1]
+    classified = []
+    for index, cluster in enumerate(clusters):
+        if cluster.get("type") != "consonant":
+            classified.append(cluster)
+            continue
+        classified.append(
+            {
+                **cluster,
+                "type": (
+                    "consonant_attack"
+                    if index < first_pitch
+                    else "consonant_release"
+                    if index > last_pitch
+                    else "consonant_bridge"
+                ),
+            }
+        )
+    return classified
+
+
+def _allocate_vocal_cluster_durations(clusters: list[dict[str, str]], total_duration: float) -> list[float]:
+    if total_duration <= 0 or not clusters:
+        return []
+    weights = [_vocal_cluster_weight(cluster) for cluster in clusters]
+    weight_sum = sum(weights)
+    if weight_sum <= 0:
+        return [total_duration / len(clusters)] * len(clusters)
+
+    durations = [total_duration * weight / weight_sum for weight in weights]
+    sustain_indexes = [
+        index
+        for index, cluster in enumerate(clusters)
+        if cluster.get("type") in {"vowel_sustain", "sonorant_sustain"}
+    ]
+    surplus = 0.0
+    non_sustain_cap = min(0.18, max(0.055, total_duration * 0.16))
+    for index, cluster in enumerate(clusters):
+        if index in sustain_indexes:
+            continue
+        if durations[index] > non_sustain_cap:
+            surplus += durations[index] - non_sustain_cap
+            durations[index] = non_sustain_cap
+    if surplus > 0 and sustain_indexes:
+        sustain_weight_sum = sum(weights[index] for index in sustain_indexes)
+        for index in sustain_indexes:
+            durations[index] += surplus * (weights[index] / sustain_weight_sum)
+
+    scale = total_duration / sum(durations) if sum(durations) > 0 else 1.0
+    return [duration * scale for duration in durations]
+
+
+def _vocal_cluster_weight(cluster: dict[str, str]) -> float:
+    text = str(cluster.get("text") or "")
+    length_bonus = max(1.0, min(2.0, len(text) ** 0.5))
+    kind = cluster.get("type")
+    if kind == "vowel_sustain":
+        return 4.0 * length_bonus
+    if kind == "sonorant_sustain":
+        return 2.3 * length_bonus
+    if kind == "fricative_effect":
+        return 0.9 * length_bonus
+    if kind == "consonant_bridge":
+        return 0.65 * length_bonus
+    return 0.48 * length_bonus
+
+
+def _vocal_unit_note_stats(start: float, end: float, melody_guide: dict[str, Any]) -> dict[str, Any]:
+    weighted_midi = []
+    overlap_seconds = 0.0
+    for note in melody_guide.get("notes") or []:
+        if not isinstance(note, dict):
+            continue
+        note_start = _safe_float(note.get("start"))
+        note_end = _safe_float(note.get("end"))
+        midi = _safe_float(note.get("midi"))
+        if note_start is None or note_end is None or midi is None or note_end <= start or note_start >= end:
+            continue
+        overlap = max(0.0, min(end, note_end) - max(start, note_start))
+        if overlap <= 0:
+            continue
+        overlap_seconds += overlap
+        weighted_midi.append((midi, overlap))
+    if not weighted_midi:
+        return {"note_count": 0, "overlap_seconds": 0.0, "midi_min": None, "midi_max": None}
+    midi_values = [midi for midi, _ in weighted_midi]
+    return {
+        "note_count": len(weighted_midi),
+        "overlap_seconds": overlap_seconds,
+        "midi_min": round(min(midi_values), 2),
+        "midi_max": round(max(midi_values), 2),
+    }
+
+
+def _vocal_unit_score_kind(kind: str, has_pitch: bool) -> str:
+    if kind == "vowel_sustain":
+        return "pitch_timing" if has_pitch else "timing"
+    if kind == "sonorant_sustain":
+        return "light_pitch_timing" if has_pitch else "timing"
+    if kind == "fricative_effect":
+        return "timing_only"
+    return "paint_only"
+
+
+def _vocal_unit_display_text(text: str) -> str:
+    clean = re.sub(r"\s+", "", text or "").strip()
+    if len(clean) <= 4:
+        return clean.lower()
+    return clean[:4].lower()
+
+
+def _is_regular_vowel_char(char: str) -> bool:
+    return char in VOCAL_UNIT_VOWELS
+
+
+def _is_vowel_char(char: str, *, treat_y: bool) -> bool:
+    return char in VOCAL_UNIT_VOWELS or (treat_y and char in {"y", "Y"})
+
+
+def _fricative_cluster_length(chars: list[str], index: int) -> int:
+    if index < 0 or index >= len(chars):
+        return 0
+    digraph = f"{chars[index]}{chars[index + 1]}".lower() if index + 1 < len(chars) else ""
+    if digraph in VOCAL_UNIT_FRICATIVE_DIGRAPHS:
+        return 2
+    return 1 if chars[index] in VOCAL_UNIT_FRICATIVES else 0
 
 
 def _backup_existing_coach_guide(path: Path) -> None:
@@ -1927,6 +2417,7 @@ def _apply_ai_review_to_coach_guide(guide: dict[str, Any], review: dict[str, Any
         )
         if word_alignment:
             revised_lyrics["alignment"] = word_alignment
+    revised_lyrics = _attach_vocal_units(revised_lyrics, melody)
 
     revised_guide = dict(guide)
     revised_guide["lyrics"] = revised_lyrics

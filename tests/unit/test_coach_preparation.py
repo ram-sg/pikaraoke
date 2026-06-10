@@ -6,6 +6,7 @@ import pytest
 from biaoke.lib.coach_preparation import (
     CoachPreparationManager,
     _adjust_first_word_onsets_with_melody,
+    _attach_vocal_units,
     _filter_melody_to_vocal_windows,
     _lyrics_lines_for_forced_alignment,
     _review_coach_guide_with_ai,
@@ -259,6 +260,92 @@ def test_write_coach_guide_prefers_forced_alignment_over_transcript(tmp_path):
     assert alignment["paint_units"][0]["start"] == 12.1
     assert alignment["paint_units"][1]["text"] == "world"
     assert "line_timing_only" not in guide["quality"]["messages"]
+
+
+def test_attach_vocal_units_marks_sustained_vowels_with_pitch():
+    lyrics = {
+        "status": "ready",
+        "lines": [{"start": 10.0, "end": 13.0, "text": "Feed my eyes"}],
+        "alignment": {
+            "status": "ready",
+            "granularity": "word",
+            "paint_units": [
+                {
+                    "start": 10.0,
+                    "end": 12.2,
+                    "text": "Feed",
+                    "line_index": 0,
+                    "unit_index": 0,
+                    "unit_type": "word",
+                }
+            ],
+        },
+    }
+    melody = {
+        "notes": [
+            {"start": 10.15, "end": 12.4, "midi": 66, "confidence": 0.91},
+        ]
+    }
+
+    enriched = _attach_vocal_units(lyrics, melody)
+
+    feed = enriched["vocal_units"][0]
+    sub_units = feed["sub_units"]
+    vowel = next(unit for unit in sub_units if unit["text"].lower() == "ee")
+    consonant_durations = [
+        unit["duration"]
+        for unit in sub_units
+        if unit["type"] in {"fricative_effect", "consonant_release", "consonant_attack"}
+    ]
+    assert enriched["vocal_units_schema"] == "biaoke.vocal_units"
+    assert vowel["type"] == "vowel_sustain"
+    assert vowel["score"] == "pitch_timing"
+    assert vowel["char_start"] == 1
+    assert vowel["char_end"] == 3
+    assert vowel["duration"] > max(consonant_durations)
+    assert vowel["end"] == pytest.approx(12.4)
+    assert feed["end"] > 12.2
+    assert vowel["note_count"] == 1
+
+
+def test_attach_vocal_units_supports_sonorant_and_fricative_exceptions():
+    lyrics = {
+        "status": "ready",
+        "lines": [{"start": 0.0, "end": 2.2, "text": "mmm sh"}],
+        "alignment": {
+            "status": "ready",
+            "granularity": "word",
+            "paint_units": [
+                {
+                    "start": 0.0,
+                    "end": 1.1,
+                    "text": "mmm",
+                    "line_index": 0,
+                    "unit_index": 0,
+                    "unit_type": "word",
+                },
+                {
+                    "start": 1.2,
+                    "end": 2.0,
+                    "text": "sh",
+                    "line_index": 0,
+                    "unit_index": 1,
+                    "unit_type": "word",
+                },
+            ],
+        },
+    }
+    melody = {"notes": [{"start": 0.05, "end": 1.0, "midi": 58, "confidence": 0.9}]}
+
+    enriched = _attach_vocal_units(lyrics, melody)
+
+    sonorant = enriched["vocal_units"][0]["sub_units"][0]
+    fricative = enriched["vocal_units"][1]["sub_units"][0]
+    assert sonorant["type"] == "sonorant_sustain"
+    assert sonorant["score"] == "light_pitch_timing"
+    assert sonorant["sustain"] is True
+    assert fricative["type"] == "fricative_effect"
+    assert fricative["score"] == "timing_only"
 
 
 def test_write_coach_guide_adds_transcript_vocalization_lines(tmp_path):

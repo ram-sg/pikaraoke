@@ -456,7 +456,38 @@ def _get_coach_guide_for_path(k, path: Path) -> dict | None:
         return None
     if not isinstance(guide, dict):
         return None
-    return guide
+    return _with_coach_vocal_units(guide)
+
+
+def _with_coach_vocal_units(guide: dict) -> dict:
+    lyrics = guide.get("lyrics") if isinstance(guide.get("lyrics"), dict) else None
+    if not lyrics:
+        return guide
+    try:
+        from biaoke.lib.coach_preparation import VOCAL_UNIT_SCHEMA, VOCAL_UNIT_VERSION, _attach_vocal_units
+    except Exception as exc:
+        logging.debug("Could not load vocal unit helper: %s", exc)
+        return guide
+    try:
+        vocal_units_version = int(lyrics.get("vocal_units_version") or 0)
+    except (TypeError, ValueError):
+        vocal_units_version = 0
+    if (
+        lyrics.get("vocal_units_schema") == VOCAL_UNIT_SCHEMA
+        and isinstance(lyrics.get("vocal_units"), list)
+        and vocal_units_version >= VOCAL_UNIT_VERSION
+    ):
+        return guide
+    melody = (
+        guide.get("reference_melody")
+        if isinstance(guide.get("reference_melody"), dict)
+        else guide.get("melody")
+        if isinstance(guide.get("melody"), dict)
+        else {}
+    )
+    enriched = dict(guide)
+    enriched["lyrics"] = _attach_vocal_units(deepcopy(lyrics), melody)
+    return enriched
 
 
 def _coach_source_media_path(coach_guide: dict) -> Path | None:

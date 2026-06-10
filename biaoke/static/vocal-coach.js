@@ -15,6 +15,8 @@
   const VOCAL_TIMELINE_SHORT_SILENCE_RATE = 0.72;
   const VOCAL_TIMELINE_LONG_SILENCE_RATE = 0.34;
   const VOCAL_TIMELINE_NOTE_RATE = 1.0;
+  const VOCAL_TIMELINE_SUSTAIN_RATE = 0.22;
+  const VOCAL_TIMELINE_EFFECT_RATE = 0.54;
   const VOCAL_TIMELINE_TEXT_PADDING = 22;
   const VOCAL_TIMELINE_MAX_TEXT_WIDTH = 240;
   const VOCAL_TIMELINE_MAX_DENSE_RATE = 2.85;
@@ -158,6 +160,7 @@
     nowPlayingPollTimer: null,
     lyrics: [],
     lyricPaintUnits: [],
+    lyricVocalUnits: [],
     lyricsHaveKaraokeTiming: false,
     lyricsOffsetSeconds: 0,
     activeLyricIndex: -1,
@@ -177,6 +180,10 @@
     lyricLaneCache: null,
     lyricVisualCacheKey: null,
     lyricVisualIntervals: null,
+    lyricVocalUnitsCacheKey: null,
+    lyricVocalUnitsCache: null,
+    lyricVocalWordCacheKey: null,
+    lyricVocalWordCache: null,
     songMidiRangeCacheKey: null,
     songMidiRangeCache: null,
   };
@@ -395,6 +402,10 @@
     state.lyricLaneCache = null;
     state.lyricVisualCacheKey = null;
     state.lyricVisualIntervals = null;
+    state.lyricVocalUnitsCacheKey = null;
+    state.lyricVocalUnitsCache = null;
+    state.lyricVocalWordCacheKey = null;
+    state.lyricVocalWordCache = null;
     state.songMidiRangeCacheKey = null;
     state.songMidiRangeCache = null;
   }
@@ -1059,7 +1070,7 @@
       if (time >= segment.end) {
         token.classList.add("is-done");
       } else if (time >= segment.start && time < segment.end) {
-        const progress = clamp((time - segment.start) / Math.max(0.03, segment.end - segment.start), 0, 1);
+        const progress = lyricUnitPaintRatio(segment, time);
         token.classList.add("is-active");
         token.style.setProperty("--token-progress", `${Math.round(progress * 100)}%`);
       }
@@ -1072,11 +1083,20 @@
     const offset = Number(state.lyricsOffsetSeconds || 0);
     const segments = normalizedLyricPaintUnits()
       .filter((unit) => unit.unitType !== "line" && Number(unit.lineIndex) === Number(lineIndex))
-      .map((unit, index, units) => ({
-        text: `${unit.text}${unit.unitType === "word" && index < units.length - 1 ? " " : ""}`,
-        start: unit.start - offset,
-        end: unit.end - offset,
-      }));
+      .map((unit, index, units) => {
+        const subUnits = lyricVocalSubUnitsForWord(unit.lineIndex, unit.segmentIndex, unit.start, unit.end);
+        const effectiveTiming = lyricSegmentTimingFromSubUnits(unit.start, unit.end, subUnits);
+        return {
+          text: `${unit.text}${unit.unitType === "word" && index < units.length - 1 ? " " : ""}`,
+          start: effectiveTiming.start - offset,
+          end: effectiveTiming.end - offset,
+          subUnits: subUnits.map((subUnit) => ({
+            ...subUnit,
+            start: subUnit.start - offset,
+            end: subUnit.end - offset,
+          })),
+        };
+      });
     return segments.length ? segments : null;
   }
 
@@ -1125,6 +1145,7 @@
   async function loadLyrics(subtitleUrl) {
     state.lyrics = [];
     state.lyricPaintUnits = [];
+    state.lyricVocalUnits = [];
     state.lyricsHaveKaraokeTiming = false;
     state.activeLyricIndex = -1;
     state.currentSubtitleUrl = subtitleUrl || null;
@@ -1152,6 +1173,7 @@
       const content = await response.text();
       state.lyrics = parseAssLyrics(content);
       state.lyricPaintUnits = [];
+      state.lyricVocalUnits = [];
       state.lyricsHaveKaraokeTiming = hasKaraokeTimingText(content);
       state.activeLyricIndex = -1;
       clearLyricRenderCaches();
@@ -1164,6 +1186,7 @@
       console.log("Could not load lyrics", error);
       state.lyrics = [];
       state.lyricPaintUnits = [];
+      state.lyricVocalUnits = [];
       state.lyricsHaveKaraokeTiming = false;
       state.activeLyricIndex = -1;
       clearLyricRenderCaches();
@@ -1188,6 +1211,7 @@
       if (qualityMessages.includes("lyrics_duration_mismatch")) {
         state.lyrics = [];
         state.lyricPaintUnits = [];
+        state.lyricVocalUnits = [];
         state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
         clearLyricRenderCaches();
@@ -1197,6 +1221,7 @@
       if (guide.status !== "ready" || !Array.isArray(guide.lines) || guide.lines.length === 0) {
         state.lyrics = [];
         state.lyricPaintUnits = [];
+        state.lyricVocalUnits = [];
         state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
         clearLyricRenderCaches();
@@ -1207,6 +1232,7 @@
       state.lyricPaintUnits = Array.isArray(guide.alignment?.paint_units)
         ? guide.alignment.paint_units
         : [];
+      state.lyricVocalUnits = Array.isArray(guide.vocal_units) ? guide.vocal_units : [];
       state.lyricsHaveKaraokeTiming = Boolean(guide.has_karaoke_timing);
       state.activeLyricIndex = -1;
       clearLyricRenderCaches();
@@ -2148,6 +2174,107 @@
       .sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex || a.segmentIndex - b.segmentIndex);
   }
 
+  function normalizedLyricVocalUnits() {
+    const offset = Number(state.lyricsOffsetSeconds || 0);
+    if (!Array.isArray(state.lyricVocalUnits) || state.lyricVocalUnits.length === 0) return [];
+    const cacheKey = lyricVocalUnitsCacheKey();
+    if (state.lyricVocalUnitsCacheKey === cacheKey && state.lyricVocalUnitsCache) return state.lyricVocalUnitsCache;
+    const units = [];
+    state.lyricVocalUnits.forEach((wordUnit, wordIndex) => {
+      if (!wordUnit || !Array.isArray(wordUnit.sub_units)) return;
+      const lineIndex = Number(wordUnit.line_index ?? 0);
+      const segmentIndex = Number(wordUnit.unit_index ?? wordIndex);
+      const wordText = String(wordUnit.text || "").trim();
+      wordUnit.sub_units.forEach((subUnit, subIndex) => {
+        const start = Number(subUnit.start) + offset;
+        const end = Number(subUnit.end) + offset;
+        const text = String(subUnit.text || subUnit.display_text || "").trim();
+        if (!text || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+        units.push({
+          start,
+          end,
+          text,
+          displayText: String(subUnit.display_text || text).trim(),
+          wordText,
+          lineIndex,
+          segmentIndex,
+          subIndex: Number(subUnit.sub_index ?? subIndex),
+          charStart: Number(subUnit.char_start),
+          charEnd: Number(subUnit.char_end),
+          type: String(subUnit.type || "sub_unit"),
+          score: String(subUnit.score || "paint_only"),
+          sustain: Boolean(subUnit.sustain),
+          duration: Number(subUnit.duration || end - start),
+          noteCount: Number(subUnit.note_count || 0),
+        });
+      });
+    });
+    const sortedUnits = units.sort(
+      (a, b) =>
+        a.start - b.start ||
+        a.lineIndex - b.lineIndex ||
+        a.segmentIndex - b.segmentIndex ||
+        a.subIndex - b.subIndex,
+    );
+    state.lyricVocalUnitsCacheKey = cacheKey;
+    state.lyricVocalUnitsCache = sortedUnits;
+    return sortedUnits;
+  }
+
+  function lyricVocalUnitsCacheKey() {
+    return [
+      state.currentLyricsKey || state.currentSubtitleUrl || state.nowPlaying.now_playing_url || "",
+      state.lyricVocalUnits.length,
+      Number(state.lyricsOffsetSeconds || 0).toFixed(3),
+    ].join("|");
+  }
+
+  function lyricVocalSubUnitsByWordKey() {
+    const cacheKey = lyricVocalUnitsCacheKey();
+    if (state.lyricVocalWordCacheKey === cacheKey && state.lyricVocalWordCache) return state.lyricVocalWordCache;
+    const map = new Map();
+    normalizedLyricVocalUnits().forEach((unit) => {
+      const key = `${unit.lineIndex}:${unit.segmentIndex}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(unit);
+    });
+    state.lyricVocalWordCacheKey = cacheKey;
+    state.lyricVocalWordCache = map;
+    return map;
+  }
+
+  function lyricVocalSubUnitsForWord(lineIndex, segmentIndex, start, end) {
+    const safeLineIndex = Number(lineIndex);
+    const safeSegmentIndex = Number(segmentIndex);
+    const units = lyricVocalSubUnitsByWordKey().get(`${safeLineIndex}:${safeSegmentIndex}`) || [];
+    return units.filter((unit) => unit.end > start - 0.05 && unit.start < end + 0.5);
+  }
+
+  function lyricSegmentTimingFromSubUnits(start, end, subUnits) {
+    const starts = [Number(start)];
+    const ends = [Number(end)];
+    if (Array.isArray(subUnits)) {
+      subUnits.forEach((unit) => {
+        const unitStart = Number(unit.start);
+        const unitEnd = Number(unit.end);
+        if (Number.isFinite(unitStart)) starts.push(unitStart);
+        if (Number.isFinite(unitEnd)) ends.push(unitEnd);
+      });
+    }
+    return {
+      start: Math.min(...starts.filter(Number.isFinite)),
+      end: Math.max(...ends.filter(Number.isFinite)),
+    };
+  }
+
+  function visibleLyricVocalSubUnits(minTime, maxTime) {
+    return normalizedLyricVocalUnits().filter((unit) => {
+      if (unit.end < minTime || unit.start > maxTime) return false;
+      if (unit.sustain) return true;
+      return ["vowel_sustain", "sonorant_sustain", "fricative_effect"].includes(unit.type) && unit.duration >= 0.22;
+    });
+  }
+
   function visibleLyricSegments(minTime, maxTime) {
     const paintTimeline = lyricPaintTimelineSegments();
     if (paintTimeline.length > 0) return paintTimeline.filter((unit) => unit.end >= minTime && unit.start <= maxTime);
@@ -2207,11 +2334,19 @@
   function lyricPaintTimelineSegments() {
     const paintUnits = normalizedLyricPaintUnits()
       .filter((unit) => unit.unitType !== "line")
-      .map((unit, index) => ({
-        ...unit,
-        segmentIndex: Number.isFinite(unit.segmentIndex) ? unit.segmentIndex : index,
-        estimated: false,
-      }));
+      .map((unit, index) => {
+        const segmentIndex = Number.isFinite(unit.segmentIndex) ? unit.segmentIndex : index;
+        const subUnits = lyricVocalSubUnitsForWord(unit.lineIndex, segmentIndex, unit.start, unit.end);
+        const effectiveTiming = lyricSegmentTimingFromSubUnits(unit.start, unit.end, subUnits);
+        return {
+          ...unit,
+          start: effectiveTiming.start,
+          end: effectiveTiming.end,
+          segmentIndex,
+          subUnits,
+          estimated: false,
+        };
+      });
     if (paintUnits.length > 0) {
       return paintUnits.sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex || a.segmentIndex - b.segmentIndex);
     }
@@ -2259,14 +2394,19 @@
       const lineUnits = unitsByLine.get(lineIndex) || new Map();
       const wordSegments = words.map((text, index) => {
         const unit = lineUnits.get(index);
+        const start = Number(unit?.start);
+        const end = Number(unit?.end);
         return {
-          start: Number(unit?.start),
-          end: Number(unit?.end),
+          start,
+          end,
           text,
           lineIndex,
           segmentIndex: index,
           precision: unit ? unit.precision : "estimated_word",
           unitType: "word",
+          subUnits: Number.isFinite(start) && Number.isFinite(end)
+            ? lyricVocalSubUnitsForWord(lineIndex, index, start, end)
+            : [],
           estimated: !unit,
         };
       });
@@ -2274,6 +2414,14 @@
       fillEstimatedWordTimes(wordSegments, lineStart, lineEnd);
       wordSegments.forEach((segment) => {
         if (!Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.end <= segment.start) return;
+        if (!Array.isArray(segment.subUnits) || segment.subUnits.length === 0) {
+          segment.subUnits = lyricVocalSubUnitsForWord(lineIndex, segment.segmentIndex, segment.start, segment.end);
+        }
+        if (Array.isArray(segment.subUnits) && segment.subUnits.length > 0) {
+          const effectiveTiming = lyricSegmentTimingFromSubUnits(segment.start, segment.end, segment.subUnits);
+          segment.start = effectiveTiming.start;
+          segment.end = effectiveTiming.end;
+        }
         segments.push(segment);
       });
     });
@@ -2321,6 +2469,7 @@
       state.currentLyricsKey || state.currentSubtitleUrl || state.nowPlaying.now_playing_url || "",
       state.lyrics.length,
       state.lyricPaintUnits.length,
+      state.lyricVocalUnits.length,
       Number(state.lyricsOffsetSeconds || 0).toFixed(3),
       Number(firstLine?.start ?? 0).toFixed(3),
       Number(lastLine?.end ?? 0).toFixed(3),
@@ -2400,13 +2549,19 @@
 
   function vocalVisualIntervals(ctx, notes, contour, pixelsPerSecond) {
     const lyricUnits = lyricRoadTimingUnits();
+    const vocalSubUnits = normalizedLyricVocalUnits();
     const firstNote = notes[0];
     const lastNote = notes[notes.length - 1];
     const firstContour = contour[0];
     const lastContour = contour[contour.length - 1];
+    const firstVocalSubUnit = vocalSubUnits[0];
+    const lastVocalSubUnit = vocalSubUnits[vocalSubUnits.length - 1];
     const cacheKey = [
       lyricContentCacheKey(),
       lyricUnits.length,
+      vocalSubUnits.length,
+      Number(firstVocalSubUnit?.start ?? 0).toFixed(3),
+      Number(lastVocalSubUnit?.end ?? 0).toFixed(3),
       notes.length,
       Number(firstNote?.start ?? 0).toFixed(3),
       Number(lastNote?.end ?? 0).toFixed(3),
@@ -2416,17 +2571,18 @@
       Math.round(pixelsPerSecond * 100),
     ].join("|");
     if (state.lyricVisualCacheKey === cacheKey && state.lyricVisualIntervals) return state.lyricVisualIntervals;
-    const intervals = buildVocalVisualIntervals(ctx, lyricUnits, notes, contour, pixelsPerSecond);
+    const intervals = buildVocalVisualIntervals(ctx, lyricUnits, vocalSubUnits, notes, contour, pixelsPerSecond);
     state.lyricVisualCacheKey = cacheKey;
     state.lyricVisualIntervals = intervals;
     return intervals;
   }
 
-  function buildVocalVisualIntervals(ctx, lyricUnits, notes, contour, pixelsPerSecond) {
+  function buildVocalVisualIntervals(ctx, lyricUnits, vocalSubUnits, notes, contour, pixelsPerSecond) {
     const lyricEvents = lyricTimelineEvents(ctx, lyricUnits, pixelsPerSecond);
+    const vocalUnitEvents = vocalUnitTimelineEvents(vocalSubUnits);
     const noteEvents = noteTimelineEvents(notes);
     const contourEvents = contourTimelineEvents(contour);
-    const events = [...lyricEvents, ...noteEvents, ...contourEvents].sort(
+    const events = [...lyricEvents, ...vocalUnitEvents, ...noteEvents, ...contourEvents].sort(
       (a, b) => a.start - b.start || a.end - b.end
     );
     if (!events.length) return [];
@@ -2509,6 +2665,33 @@
     return events;
   }
 
+  function vocalUnitTimelineEvents(units) {
+    if (!Array.isArray(units) || units.length === 0) return [];
+    return units
+      .map((unit) => {
+        const start = Number(unit.start);
+        const end = Number(unit.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+        if (!["vowel_sustain", "sonorant_sustain", "fricative_effect"].includes(unit.type)) return null;
+        const duration = end - start;
+        if (duration < 0.16) return null;
+        const isSustain = unit.sustain || unit.type === "vowel_sustain" || unit.type === "sonorant_sustain";
+        return {
+          start,
+          end,
+          kind: "vocal_unit",
+          subtype: unit.type,
+          duration,
+          rate: unit.type === "fricative_effect" && !unit.sustain
+            ? VOCAL_TIMELINE_EFFECT_RATE
+            : isSustain
+              ? VOCAL_TIMELINE_SUSTAIN_RATE
+              : VOCAL_TIMELINE_EFFECT_RATE,
+        };
+      })
+      .filter(Boolean);
+  }
+
   function noteTimelineEvents(notes) {
     if (!Array.isArray(notes) || notes.length === 0) return [];
     return notes
@@ -2561,8 +2744,15 @@
     }
 
     const hasLyric = activeEvents.some((event) => event.kind === "lyric");
+    const vocalUnitEvents = activeEvents.filter((event) => event.kind === "vocal_unit");
     const hasVocal = activeEvents.some((event) => event.kind === "note" || event.kind === "contour");
     let rate = hasVocal ? VOCAL_TIMELINE_NOTE_RATE : 0.86;
+    let hasSustain = false;
+    if (vocalUnitEvents.length > 0) {
+      const vocalRate = Math.min(...vocalUnitEvents.map((event) => Number(event.rate) || VOCAL_TIMELINE_EFFECT_RATE));
+      hasSustain = vocalUnitEvents.some((event) => event.subtype === "vowel_sustain" || event.subtype === "sonorant_sustain");
+      rate = Math.min(rate, vocalRate);
+    }
     let minimumWidth = 0;
     activeEvents.forEach((event) => {
       if (event.kind !== "lyric") return;
@@ -2572,13 +2762,15 @@
       minimumWidth = Math.max(minimumWidth, (Number(event.minimumWidth) || 0) * (overlap / eventDuration));
     });
     if (hasLyric && minimumWidth > 0) {
-      rate = Math.max(rate, Math.min(VOCAL_TIMELINE_MAX_DENSE_RATE, minimumWidth / Math.max(1, baseWidth)));
+      const denseRate = Math.min(VOCAL_TIMELINE_MAX_DENSE_RATE, minimumWidth / Math.max(1, baseWidth));
+      rate = hasSustain ? Math.min(rate, denseRate) : Math.max(rate, denseRate);
     }
-    return Math.max(4, baseWidth * rate, minimumWidth);
+    return Math.max(4, baseWidth * rate, hasSustain ? 0 : minimumWidth);
   }
 
   function timelineSegmentKind(activeEvents) {
     if (activeEvents.some((event) => event.kind === "lyric")) return "lyric";
+    if (activeEvents.some((event) => event.kind === "vocal_unit")) return "vocal_unit";
     if (activeEvents.some((event) => event.kind === "note")) return "note";
     if (activeEvents.some((event) => event.kind === "contour")) return "contour";
     return "silence";
@@ -2701,8 +2893,7 @@
 
     ctx.save();
     ctx.beginPath();
-    const progress = lyricUnitPaintProgress(segment, songTime);
-    ctx.rect(textX, clipTop, Math.max(1, weightedLyricTextFillWidth(ctx, segment.text, progress)), clipHeight);
+    ctx.rect(textX, clipTop, Math.max(1, lyricUnitPaintFillWidth(ctx, segment, songTime)), clipHeight);
     ctx.clip();
     ctx.fillStyle = "rgba(18, 199, 156, 1)";
     ctx.fillText(segment.text, textX, textY);
@@ -2721,6 +2912,124 @@
     const end = Number(segment?.end);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
     return clamp((songTime - start) / Math.max(0.04, end - start), 0, 1);
+  }
+
+  function lyricUnitPaintRatio(segment, songTime) {
+    const text = String(segment?.text || "");
+    const chars = Array.from(text);
+    if (!chars.length) return lyricUnitPaintProgress(segment, songTime);
+    if (songTime <= Number(segment?.start)) return 0;
+    if (songTime >= Number(segment?.end)) return 1;
+    const subUnits = Array.isArray(segment?.subUnits)
+      ? segment.subUnits
+          .filter((unit) => unit && Number.isFinite(Number(unit.start)) && Number.isFinite(Number(unit.end)))
+          .sort((a, b) => Number(a.start) - Number(b.start) || Number(a.subIndex || 0) - Number(b.subIndex || 0))
+      : [];
+    if (!subUnits.length) return lyricUnitPaintProgress(segment, songTime);
+
+    for (const unit of subUnits) {
+      const start = Number(unit.start);
+      const end = Number(unit.end);
+      const charStart = Number(unit.charStart);
+      const charEnd = Number(unit.charEnd);
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        !Number.isFinite(charStart) ||
+        !Number.isFinite(charEnd) ||
+        charEnd <= charStart ||
+        charStart < 0 ||
+        charStart > chars.length
+      ) {
+        return lyricUnitPaintProgress(segment, songTime);
+      }
+      const clampedCharEnd = Math.min(chars.length, charEnd);
+      if (songTime >= end) continue;
+      if (songTime <= start) return clamp(charStart / chars.length, 0, 1);
+      const progress = clamp((songTime - start) / Math.max(0.035, end - start), 0, 1);
+      return clamp((charStart + (clampedCharEnd - charStart) * progress) / chars.length, 0, 1);
+    }
+    return 1;
+  }
+
+  function lyricUnitPaintFillWidth(ctx, segment, songTime) {
+    const text = String(segment?.text || "");
+    if (!text) return 0;
+    const fullWidth = ctx.measureText(text).width;
+    if (songTime <= Number(segment?.start)) return 0;
+    if (songTime >= Number(segment?.end)) return fullWidth;
+
+    const subUnits = Array.isArray(segment?.subUnits)
+      ? segment.subUnits
+          .filter((unit) => unit && Number.isFinite(Number(unit.start)) && Number.isFinite(Number(unit.end)))
+          .sort((a, b) => Number(a.start) - Number(b.start) || Number(a.subIndex || 0) - Number(b.subIndex || 0))
+      : [];
+    if (!subUnits.length) {
+      return weightedLyricTextFillWidth(ctx, text, lyricUnitPaintProgress(segment, songTime));
+    }
+
+    const spanWidth = lyricSubUnitSpanPaintWidth(ctx, text, subUnits, songTime);
+    if (Number.isFinite(spanWidth)) return spanWidth;
+
+    const unitWidths = subUnits.map((unit) => ctx.measureText(String(unit.text || unit.displayText || "")).width);
+    const unitWidthSum = unitWidths.reduce((sum, width) => sum + width, 0);
+    if (unitWidthSum <= 0) {
+      return weightedLyricTextFillWidth(ctx, text, lyricUnitPaintProgress(segment, songTime));
+    }
+
+    let paintedWidth = 0;
+    for (let index = 0; index < subUnits.length; index++) {
+      const unit = subUnits[index];
+      const start = Number(unit.start);
+      const end = Number(unit.end);
+      const unitWidth = unitWidths[index];
+      if (songTime >= end) {
+        paintedWidth += unitWidth;
+        continue;
+      }
+      if (songTime > start) {
+        const progress = clamp((songTime - start) / Math.max(0.035, end - start), 0, 1);
+        paintedWidth += unitWidth * progress;
+      }
+      break;
+    }
+    return clamp(paintedWidth * (fullWidth / unitWidthSum), 0, fullWidth);
+  }
+
+  function lyricSubUnitSpanPaintWidth(ctx, text, subUnits, songTime) {
+    const chars = Array.from(String(text || ""));
+    if (!chars.length) return 0;
+    const fullWidth = ctx.measureText(text).width;
+    let paintedWidth = 0;
+    for (const unit of subUnits) {
+      const start = Number(unit.start);
+      const end = Number(unit.end);
+      const charStart = Number(unit.charStart);
+      const charEnd = Number(unit.charEnd);
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        !Number.isFinite(charStart) ||
+        !Number.isFinite(charEnd) ||
+        charEnd <= charStart ||
+        charStart < 0 ||
+        charEnd > chars.length
+      ) {
+        return Number.NaN;
+      }
+      const prefixWidth = ctx.measureText(chars.slice(0, charStart).join("")).width;
+      const unitWidth = ctx.measureText(chars.slice(charStart, charEnd).join("")).width;
+      if (songTime >= end) {
+        paintedWidth = Math.max(paintedWidth, prefixWidth + unitWidth);
+        continue;
+      }
+      if (songTime > start) {
+        const progress = clamp((songTime - start) / Math.max(0.035, end - start), 0, 1);
+        paintedWidth = Math.max(paintedWidth, prefixWidth + unitWidth * progress);
+      }
+      break;
+    }
+    return clamp(paintedWidth, 0, fullWidth);
   }
 
   function weightedLyricTextFillWidth(ctx, text, progress) {
@@ -2818,8 +3127,7 @@
         if (!wordActive) return;
         ctx.save();
         ctx.beginPath();
-        const progress = lyricUnitPaintProgress(word, songTime);
-        ctx.rect(x, y - fontSize, Math.max(1, weightedLyricTextFillWidth(ctx, word.text, progress)), fontSize * 2);
+        ctx.rect(x, y - fontSize, Math.max(1, lyricUnitPaintFillWidth(ctx, word, songTime)), fontSize * 2);
         ctx.clip();
         ctx.globalAlpha = 1;
         ctx.fillStyle = "rgba(18, 199, 156, 1)";
@@ -2941,15 +3249,19 @@
     const items = [];
     let minX = Infinity;
     let maxX = -Infinity;
+    let previousRight = -Infinity;
+    const minGap = Math.max(fontSize * 0.34, ctx.measureText(" ").width * 0.8);
     words.forEach((word) => {
       const width = ctx.measureText(word.text).width;
       const startX = xForTime(Number(word.start));
       const endX = xForTime(Number(word.end));
-      const x = startX + 6;
+      const preferredX = startX + 6;
+      const x = Math.max(preferredX, previousRight + minGap);
       const slotEndX = Math.max(x + 1, endX - 6);
       items.push({ word, x, endX: slotEndX, width });
       minX = Math.min(minX, x);
       maxX = Math.max(maxX, x + width, slotEndX);
+      previousRight = x + width;
     });
     if (!items.length) {
       return { items: [], minX: Infinity, maxX: -Infinity };
@@ -3212,7 +3524,7 @@
     });
   }
 
-  function drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime) {
+  function drawTargetNoteBlocks(ctx, visibleNotes, vocalSubUnits, xForTime, yForMidi, layout, songTime) {
     let previous = null;
     ctx.save();
     ctx.lineCap = "round";
@@ -3273,7 +3585,12 @@
         ctx.fill();
       }
 
-      if (width > 54) {
+      const vocalLabel = bestVocalLabelForNote(note, vocalSubUnits);
+      if (vocalLabel && width > 38) {
+        ctx.fillStyle = vocalLabelStyle(vocalLabel, isCurrent);
+        ctx.font = "900 13px sans-serif";
+        ctx.fillText(vocalLabel.displayText, x1 + 8, blockY + blockHeight - 8);
+      } else if (width > 54) {
         ctx.fillStyle = isCurrent ? "rgba(246, 243, 234, 0.42)" : "rgba(246, 243, 234, 0.16)";
         ctx.font = "800 12px sans-serif";
         ctx.fillText(noteName(midi), x1 + 8, blockY + blockHeight - 8);
@@ -3282,6 +3599,36 @@
       previous = { end, x: x2, y };
     });
     ctx.restore();
+  }
+
+  function bestVocalLabelForNote(note, vocalSubUnits) {
+    if (!Array.isArray(vocalSubUnits) || vocalSubUnits.length === 0) return null;
+    const start = Number(note?.start);
+    const end = Number(note?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    let best = null;
+    let bestOverlap = 0;
+    vocalSubUnits.forEach((unit) => {
+      if (!["vowel_sustain", "sonorant_sustain", "fricative_effect"].includes(unit.type)) return;
+      const overlap = Math.max(0, Math.min(end, Number(unit.end)) - Math.max(start, Number(unit.start)));
+      if (overlap <= bestOverlap) return;
+      const displayText = String(unit.displayText || unit.text || "").trim();
+      if (!displayText) return;
+      bestOverlap = overlap;
+      best = { ...unit, displayText };
+    });
+    if (!best || bestOverlap < Math.min(0.08, (end - start) * 0.35)) return null;
+    return best;
+  }
+
+  function vocalLabelStyle(unit, isCurrent) {
+    if (unit.type === "fricative_effect" || unit.score === "timing_only") {
+      return isCurrent ? "rgba(246, 243, 234, 0.76)" : "rgba(246, 243, 234, 0.34)";
+    }
+    if (unit.type === "sonorant_sustain") {
+      return isCurrent ? "rgba(237, 176, 73, 0.92)" : "rgba(237, 176, 73, 0.48)";
+    }
+    return isCurrent ? "rgba(18, 199, 156, 0.98)" : "rgba(18, 199, 156, 0.58)";
   }
 
   function drawTargetContourTiles(ctx, visibleContour, xForTime, yForMidi, layout, songTime) {
@@ -3488,9 +3835,10 @@
 
     const visibleNotes = visibleRoadNotes(notes, minTime, maxTime);
     const visibleContour = visibleRoadContour(contour, minTime, maxTime);
+    const visibleVocalSubUnits = visibleLyricVocalSubUnits(minTime, maxTime);
     drawLyricWordPitchBars(ctx, timedSegments, visibleContour, visibleNotes, xForTime, yForMidi, layout, songTime);
     drawPitchBandCorridors(ctx, visibleNotes, xForTime, yForMidi, layout);
-    drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime);
+    drawTargetNoteBlocks(ctx, visibleNotes, visibleVocalSubUnits, xForTime, yForMidi, layout, songTime);
     if (visibleContour.length > 0) {
       drawTargetContourTiles(ctx, visibleContour, xForTime, yForMidi, layout, songTime);
     }
