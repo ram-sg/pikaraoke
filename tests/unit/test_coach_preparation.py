@@ -261,6 +261,59 @@ def test_write_coach_guide_prefers_forced_alignment_over_transcript(tmp_path):
     assert "line_timing_only" not in guide["quality"]["messages"]
 
 
+def test_write_coach_guide_adds_transcript_vocalization_lines(tmp_path):
+    media_path = tmp_path / "Artist - Chant---abc12345678.mp4"
+    media_path.write_bytes(b"fake media")
+    lyrics_guide = {
+        "lyrics": {
+            "status": "ready",
+            "confidence": 0.8,
+            "has_karaoke_timing": False,
+            "lines": [{"start": 0.0, "end": 2.0, "text": "hello world"}],
+        }
+    }
+    melody_guide = {
+        "status": "ready",
+        "duration_seconds": 12,
+        "notes": [
+            {"start": 0.2, "end": 1.0, "midi": 60, "confidence": 0.9},
+            {"start": 5.0, "end": 6.8, "midi": 64, "confidence": 0.88},
+        ],
+        "contour": [
+            {"time": 0.5, "midi": 60, "confidence": 0.9},
+            {"time": 5.2, "midi": 64, "confidence": 0.88},
+            {"time": 6.2, "midi": 64, "confidence": 0.86},
+        ],
+    }
+    transcript = {
+        "status": "ready",
+        "engine": "faster-whisper",
+        "words": [
+            {"word": "hello", "start": 0.2, "end": 0.6, "probability": 0.93},
+            {"word": "la", "start": 5.05, "end": 5.35, "probability": 0.84},
+            {"word": "la", "start": 5.7, "end": 6.05, "probability": 0.86},
+            {"word": "oh", "start": 6.25, "end": 6.65, "probability": 0.82},
+        ],
+    }
+
+    guide_path = _write_coach_guide(media_path, lyrics_guide, melody_guide, transcript=transcript)
+
+    with open(guide_path, encoding="utf-8") as handle:
+        guide = json.load(handle)
+
+    generated_lines = [line for line in guide["lyrics"]["lines"] if line.get("generated")]
+    assert len(generated_lines) == 1
+    assert generated_lines[0]["text"] == "La, la, oh"
+    assert generated_lines[0]["timing_source"] == "transcript_vocalization"
+    generated_units = [
+        unit
+        for unit in guide["lyrics"]["alignment"]["paint_units"]
+        if unit.get("precision") == "transcript_vocalization"
+    ]
+    assert [unit["text"] for unit in generated_units] == ["la", "la", "oh"]
+    assert guide["lyrics"]["auto_vocalizations"]["line_count"] == 1
+
+
 def test_forced_alignment_lines_prefer_transcript_word_windows():
     lyrics = {
         "status": "ready",
@@ -382,6 +435,8 @@ def test_pending_analysis_filters_pitch_notes_outside_vocal_windows(tmp_path):
 
     assert [note["midi"] for note in coach_guide["melody"]["notes"]] == [60, 62]
     assert [point["midi"] for point in coach_guide["melody"]["contour"]] == [60, 62]
+    assert [note["midi"] for note in coach_guide["reference_melody"]["notes"]] == [60, 65, 62]
+    assert [point["midi"] for point in coach_guide["reference_melody"]["contour"]] == [60, 65, 62]
     assert [task["target_midi"] for task in coach_guide["tasks"]] == [60, 62]
     assert coach_guide["melody"]["vocal_filter"]["removed_notes"] == 1
     assert coach_guide["melody"]["vocal_filter"]["removed_contour_points"] == 1
@@ -573,7 +628,10 @@ def test_transcription_retries_without_vad_when_prompt_improves_alignment(tmp_pa
     weak_transcript = {
         "status": "ready",
         "engine": "faster-whisper",
-        "words": [{"word": "unrelated", "start": 61.0, "end": 61.4, "probability": 0.2}],
+        "words": [
+            {"word": "unrelated", "start": 61.0, "end": 61.4, "probability": 0.2},
+            {"word": "la", "start": 86.0, "end": 86.35, "probability": 0.84},
+        ],
     }
     prompted_transcript = {
         "status": "ready",
@@ -607,7 +665,9 @@ def test_transcription_retries_without_vad_when_prompt_improves_alignment(tmp_pa
 
     assert transcript["mode"] == "lyrics_prompt_no_vad"
     assert transcript["selection_reason"] == "lyrics_prompt_no_vad_improved_alignment"
-    assert transcript["fallback_of"]["word_count"] == 1
+    assert transcript["merged_vocalization_words"] == 1
+    assert any(word.get("source") == "fallback_vocalization" for word in transcript["words"])
+    assert transcript["fallback_of"]["word_count"] == 2
     assert alignment["method"] == "faster_whisper_lyrics_prompt_no_vad_alignment"
     assert alignment["confidence"]["overall"] > 0.9
     assert alignment["paint_units"][0]["start"] == 30.5

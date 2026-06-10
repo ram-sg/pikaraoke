@@ -76,6 +76,12 @@ VOCAL_FILTER_PREFACE_MAX_NOTE_GAP_SECONDS = 0.65
 VOCAL_FILTER_PREFACE_MIN_SECONDS = 0.45
 VOCAL_FILTER_PREFACE_MIN_CONFIDENCE = 0.7
 VOCAL_FILTER_VERSION = 4
+AUTO_VOCALIZATION_MAX_EXISTING_OVERLAP_RATIO = 0.42
+AUTO_VOCALIZATION_MAX_GAP_SECONDS = 1.1
+AUTO_VOCALIZATION_MIN_CONFIDENCE = 0.22
+AUTO_VOCALIZATION_MIN_GROUP_SECONDS = 0.55
+AUTO_VOCALIZATION_MIN_GROUP_WORDS = 2
+AUTO_VOCALIZATION_NOTE_GRACE_SECONDS = 0.4
 AI_REVIEW_MIN_CONFIDENCE = 0.35
 AI_REVIEW_EXISTING_LYRICS_MIN_TEXT_MATCH = 0.85
 AI_REVIEW_MAX_LINES = 320
@@ -602,14 +608,14 @@ class CoachPreparationManager:
                 )
             melody_source_path = Path(stems["vocals_path"]) if stems else media_path
             self._db.update_coach_job(job_id, stage="extract_melody", progress=55)
-            melody_guide = _extract_coach_melody(melody_source_path)
+            reference_melody_guide = _extract_coach_melody(melody_source_path)
             self._db.update_coach_job(job_id, stage="align_lyrics", progress=72)
             transcript, transcript_alignment = _transcribe_and_align_coach_vocals(
                 melody_source_path,
                 lyrics_guide.get("lyrics") or {},
             )
             melody_guide = _filter_melody_to_vocal_windows(
-                melody_guide,
+                reference_melody_guide,
                 lyrics_guide.get("lyrics") or {},
                 transcript,
                 preserve_vocal_stem_preface=bool(stems and stems.get("vocals_path")),
@@ -617,7 +623,7 @@ class CoachPreparationManager:
             forced_alignment = _align_coach_lyrics(
                 melody_source_path,
                 lyrics_guide.get("lyrics") or {},
-                melody_guide,
+                reference_melody_guide,
                 transcript,
                 transcript_alignment=transcript_alignment,
             )
@@ -628,6 +634,7 @@ class CoachPreparationManager:
                 melody_guide,
                 stems=stems,
                 melody_source_path=melody_source_path,
+                reference_melody_guide=reference_melody_guide,
                 transcript=transcript,
                 transcript_alignment=transcript_alignment,
                 forced_alignment=forced_alignment,
@@ -761,18 +768,21 @@ def _write_coach_guide(
     *,
     stems: dict[str, Any] | None = None,
     melody_source_path: str | Path | None = None,
+    reference_melody_guide: dict[str, Any] | None = None,
     transcript: dict[str, Any] | None = None,
     transcript_alignment: dict[str, Any] | None = None,
     forced_alignment: dict[str, Any] | None = None,
 ) -> Path:
     path = _coach_guide_path(media_path)
     _backup_existing_coach_guide(path)
-    melody_guide = _filter_melody_to_vocal_windows(
-        melody_guide,
-        lyrics_guide.get("lyrics") or {},
-        transcript,
-        preserve_vocal_stem_preface=bool(stems and stems.get("vocals_path")),
-    )
+    reference_melody = dict(reference_melody_guide or melody_guide or {})
+    if reference_melody_guide is None:
+        melody_guide = _filter_melody_to_vocal_windows(
+            melody_guide,
+            lyrics_guide.get("lyrics") or {},
+            transcript,
+            preserve_vocal_stem_preface=bool(stems and stems.get("vocals_path")),
+        )
     lyrics = with_vocal_activity_alignment(lyrics_guide.get("lyrics") or {}, melody_guide)
     if _is_usable_forced_alignment(forced_alignment):
         forced_payload = _forced_alignment_payload(forced_alignment)
@@ -790,7 +800,9 @@ def _write_coach_guide(
         if word_alignment:
             lyrics["alignment"] = word_alignment
     if isinstance(lyrics.get("alignment"), dict):
-        lyrics["alignment"] = _adjust_first_word_onsets_with_melody(lyrics["alignment"], melody_guide)
+        lyrics["alignment"] = _adjust_first_word_onsets_with_melody(lyrics["alignment"], reference_melody)
+    lyrics = _augment_lyrics_with_transcript_vocalizations(lyrics, transcript, reference_melody)
+    lyrics = _sort_lyrics_lines_and_remap_alignment(lyrics)
     quality_lyrics_guide = {"lyrics": lyrics}
     payload = {
         "schema": COACH_GUIDE_SCHEMA,
@@ -804,13 +816,14 @@ def _write_coach_guide(
         "transcript": transcript or {"status": "missing", "message": "Transcricao vocal ainda nao foi gerada."},
         "lyrics": lyrics,
         "melody": melody_guide,
-        "tasks": _build_pitch_tasks(lyrics_guide, melody_guide),
+        "reference_melody": _reference_melody_payload(reference_melody, melody_guide),
+        "tasks": _build_pitch_tasks(quality_lyrics_guide, melody_guide),
         "quality": {
-            "status": _coach_quality_status(quality_lyrics_guide, melody_guide, stems),
+            "status": _coach_quality_status(quality_lyrics_guide, reference_melody, stems),
             "lyrics_ready": (lyrics_guide.get("lyrics") or {}).get("status") == "ready",
-            "melody_ready": bool(melody_guide.get("notes")),
+            "melody_ready": bool((reference_melody or melody_guide).get("notes")),
             "vocal_stem_ready": bool(stems and stems.get("vocals_path")),
-            "messages": _coach_quality_messages(quality_lyrics_guide, melody_guide, stems),
+            "messages": _coach_quality_messages(quality_lyrics_guide, reference_melody, stems),
         },
     }
     tmp_path = path.with_name(path.name + ".tmp")
@@ -851,6 +864,281 @@ def _lyrics_ready(lyrics: Any) -> bool:
         and isinstance(lyrics.get("lines"), list)
         and len(lyrics.get("lines") or []) > 0
     )
+
+
+def _reference_melody_payload(
+    reference_melody: dict[str, Any],
+    filtered_melody: dict[str, Any],
+) -> dict[str, Any]:
+    payload = dict(reference_melody or {})
+    payload["reference_type"] = "continuous_vocal_stem"
+    payload["render_melody_filter"] = (filtered_melody or {}).get("vocal_filter") or {}
+    payload["notes"] = [
+        dict(note)
+        for note in payload.get("notes", [])
+        if isinstance(note, dict)
+    ]
+    payload["contour"] = [
+        dict(point)
+        for point in payload.get("contour", [])
+        if isinstance(point, dict)
+    ]
+    return payload
+
+
+def _augment_lyrics_with_transcript_vocalizations(
+    lyrics: dict[str, Any],
+    transcript: dict[str, Any] | None,
+    melody_guide: dict[str, Any],
+) -> dict[str, Any]:
+    """Add transcript-backed non-lexical vocalization lines missing from lyrics."""
+    if not _lyrics_ready(lyrics) or not isinstance(transcript, dict):
+        return lyrics
+
+    groups = _transcript_vocalization_groups(
+        transcript,
+        lyrics.get("alignment") if isinstance(lyrics.get("alignment"), dict) else None,
+        melody_guide,
+    )
+    if not groups:
+        return lyrics
+
+    augmented = dict(lyrics)
+    lines = [dict(line) if isinstance(line, dict) else line for line in lyrics.get("lines", [])]
+    alignment = dict(lyrics.get("alignment") or {})
+    paint_units = [
+        dict(unit) if isinstance(unit, dict) else unit
+        for unit in alignment.get("paint_units", [])
+        if isinstance(unit, dict)
+    ]
+    next_line_index = len(lines)
+    generated_count = 0
+    for group in groups:
+        line_text = _vocalization_group_text(group)
+        if not line_text:
+            continue
+        line_index = next_line_index
+        next_line_index += 1
+        generated_count += 1
+        start = float(group[0]["start"])
+        end = float(group[-1]["end"])
+        lines.append(
+            {
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": line_text,
+                "has_karaoke_timing": False,
+                "generated": True,
+                "timing_source": "transcript_vocalization",
+            }
+        )
+        for unit_index, word in enumerate(group):
+            paint_units.append(
+                {
+                    "start": round(float(word["start"]), 3),
+                    "end": round(float(word["end"]), 3),
+                    "text": str(word["text"]),
+                    "line_index": line_index,
+                    "unit_index": unit_index,
+                    "unit_type": "word",
+                    "precision": "transcript_vocalization",
+                    "confidence": round(float(word.get("confidence") or 0.0), 3),
+                }
+            )
+
+    if generated_count <= 0:
+        return lyrics
+
+    if paint_units:
+        alignment.update(
+            {
+                "schema": alignment.get("schema") or ALIGNMENT_SCHEMA,
+                "version": alignment.get("version") or ALIGNMENT_VERSION,
+                "status": "ready",
+                "granularity": alignment.get("granularity") or "word",
+                "method": _append_method_tag(alignment.get("method") or "transcript_word_alignment", "vocalizations"),
+                "paint_units": paint_units,
+                "confidence": {
+                    **(alignment.get("confidence") or {}),
+                    "auto_vocalization_lines": generated_count,
+                },
+            }
+        )
+
+    augmented["lines"] = lines
+    augmented["alignment"] = alignment
+    augmented["auto_vocalizations"] = {
+        "source": "transcript_words",
+        "line_count": generated_count,
+        "reversible": True,
+    }
+    return augmented
+
+
+def _transcript_vocalization_groups(
+    transcript: dict[str, Any],
+    alignment: dict[str, Any] | None,
+    melody_guide: dict[str, Any],
+) -> list[list[dict[str, Any]]]:
+    words = transcript.get("words") if isinstance(transcript.get("words"), list) else []
+    existing_windows = _alignment_word_windows(alignment)
+    candidates = []
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        text = str(word.get("word") or word.get("text") or "").strip()
+        normalized = _normalized_onset_word(text)
+        if normalized not in ALIGNMENT_ADJUSTABLE_SHORT_VOCALIZATIONS:
+            continue
+        start = _safe_float(word.get("start"))
+        end = _safe_float(word.get("end"))
+        confidence = _safe_float(word.get("probability") or word.get("confidence"))
+        if start is None or end is None or end <= start:
+            continue
+        if confidence is not None and confidence < AUTO_VOCALIZATION_MIN_CONFIDENCE:
+            continue
+        if _existing_alignment_overlap_ratio(start, end, existing_windows) > AUTO_VOCALIZATION_MAX_EXISTING_OVERLAP_RATIO:
+            continue
+        if not _melody_supports_time_span(melody_guide, start, end):
+            continue
+        candidates.append(
+            {
+                "text": _display_vocalization_word(text),
+                "normalized": normalized,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "confidence": confidence if confidence is not None else 0.6,
+            }
+        )
+
+    candidates.sort(key=lambda item: (float(item["start"]), float(item["end"])))
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        nonlocal current
+        if _vocalization_group_is_displayable(current):
+            groups.append(current)
+        current = []
+
+    for word in candidates:
+        if not current:
+            current = [word]
+            continue
+        gap = float(word["start"]) - float(current[-1]["end"])
+        if gap <= AUTO_VOCALIZATION_MAX_GAP_SECONDS:
+            current.append(word)
+            continue
+        flush()
+        current = [word]
+    flush()
+    return groups
+
+
+def _alignment_word_windows(alignment: dict[str, Any] | None) -> list[tuple[float, float]]:
+    if not isinstance(alignment, dict):
+        return []
+    windows = []
+    units = alignment.get("paint_units") if isinstance(alignment.get("paint_units"), list) else []
+    for unit in units:
+        if not isinstance(unit, dict):
+            continue
+        if str(unit.get("unit_type") or "").strip().casefold() == "line":
+            continue
+        start = _safe_float(unit.get("start"))
+        end = _safe_float(unit.get("end"))
+        if start is not None and end is not None and end > start:
+            windows.append((start, end))
+    return windows
+
+
+def _existing_alignment_overlap_ratio(
+    start: float,
+    end: float,
+    existing_windows: list[tuple[float, float]],
+) -> float:
+    duration = max(0.001, end - start)
+    return _window_overlap_seconds(start, end, existing_windows) / duration
+
+
+def _melody_supports_time_span(melody_guide: dict[str, Any], start: float, end: float) -> bool:
+    notes = melody_guide.get("notes") if isinstance(melody_guide.get("notes"), list) else []
+    window_start = max(0.0, start - AUTO_VOCALIZATION_NOTE_GRACE_SECONDS)
+    window_end = end + AUTO_VOCALIZATION_NOTE_GRACE_SECONDS
+    for note in notes:
+        if not isinstance(note, dict):
+            continue
+        note_start = _safe_float(note.get("start"))
+        note_end = _safe_float(note.get("end"))
+        if note_start is None or note_end is None or note_end <= note_start:
+            continue
+        if note_end >= window_start and note_start <= window_end:
+            return True
+    contour = melody_guide.get("contour") if isinstance(melody_guide.get("contour"), list) else []
+    for point in contour:
+        if not isinstance(point, dict):
+            continue
+        time = _first_float(point.get("time"), point.get("t"), point.get("start"))
+        if time is not None and window_start <= time <= window_end:
+            return True
+    return False
+
+
+def _vocalization_group_is_displayable(group: list[dict[str, Any]]) -> bool:
+    if not group:
+        return False
+    duration = float(group[-1]["end"]) - float(group[0]["start"])
+    return len(group) >= AUTO_VOCALIZATION_MIN_GROUP_WORDS or duration >= AUTO_VOCALIZATION_MIN_GROUP_SECONDS
+
+
+def _vocalization_group_text(group: list[dict[str, Any]]) -> str:
+    words = [str(word.get("text") or "").strip() for word in group if str(word.get("text") or "").strip()]
+    if not words:
+        return ""
+    words[0] = words[0][:1].upper() + words[0][1:]
+    return ", ".join(words)
+
+
+def _display_vocalization_word(text: str) -> str:
+    normalized = _normalized_onset_word(text)
+    return normalized or str(text or "").strip()
+
+
+def _sort_lyrics_lines_and_remap_alignment(lyrics: dict[str, Any]) -> dict[str, Any]:
+    lines = lyrics.get("lines") if isinstance(lyrics.get("lines"), list) else []
+    if not lines:
+        return lyrics
+    indexed_lines = []
+    for index, line in enumerate(lines):
+        if not isinstance(line, dict):
+            continue
+        indexed_lines.append((index, dict(line)))
+    indexed_lines.sort(
+        key=lambda item: (
+            _safe_float(item[1].get("start")) if _safe_float(item[1].get("start")) is not None else float("inf"),
+            _safe_float(item[1].get("end")) if _safe_float(item[1].get("end")) is not None else float("inf"),
+            item[0],
+        )
+    )
+    remap = {old_index: new_index for new_index, (old_index, _line) in enumerate(indexed_lines)}
+    if all(remap.get(index) == index for index, _line in indexed_lines):
+        return lyrics
+
+    sorted_lyrics = dict(lyrics)
+    sorted_lyrics["lines"] = [line for _old_index, line in indexed_lines]
+    alignment = sorted_lyrics.get("alignment") if isinstance(sorted_lyrics.get("alignment"), dict) else None
+    if alignment:
+        sorted_alignment = dict(alignment)
+        units = []
+        for unit in alignment.get("paint_units", []) if isinstance(alignment.get("paint_units"), list) else []:
+            if not isinstance(unit, dict):
+                continue
+            old_line_index = _safe_int(unit.get("line_index"), default=0)
+            mapped = remap.get(old_line_index, old_line_index)
+            units.append({**unit, "line_index": mapped})
+        sorted_alignment["paint_units"] = units
+        sorted_lyrics["alignment"] = sorted_alignment
+    return sorted_lyrics
 
 
 def _is_usable_forced_alignment(alignment: dict[str, Any] | None) -> bool:
@@ -1853,6 +2141,14 @@ def _clean_ai_text(value: Any) -> str:
 def _ai_review_source_name(original_source: Any, provider: Any = None) -> str:
     source = str(original_source or "").strip()
     tag = _ai_review_tag(provider or _select_ai_review_provider(require_key=False))
+    return _append_method_tag(source, tag)
+
+
+def _append_method_tag(source: Any, tag: Any) -> str:
+    source = str(source or "").strip()
+    tag = str(tag or "").strip()
+    if not tag:
+        return source
     if not source:
         return tag
     if tag in source.split("+"):
@@ -2606,10 +2902,75 @@ def _transcribe_and_align_coach_vocals(
         return transcript, transcript_alignment
 
     selected = dict(retry_transcript or {})
+    selected = _merge_transcript_vocalizations(selected, transcript)
     selected["fallback_of"] = _transcript_metadata(transcript)
     selected["selection_reason"] = "lyrics_prompt_no_vad_improved_alignment"
     selected["alignment_coverage"] = _alignment_coverage(retry_alignment)
     return selected, retry_alignment
+
+
+def _merge_transcript_vocalizations(
+    primary: dict[str, Any],
+    fallback: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(primary, dict) or not isinstance(fallback, dict):
+        return primary
+    primary_words = [
+        dict(word)
+        for word in primary.get("words", [])
+        if isinstance(word, dict)
+    ]
+    fallback_words = [
+        dict(word)
+        for word in fallback.get("words", [])
+        if isinstance(word, dict)
+    ]
+    if not primary_words or not fallback_words:
+        return primary
+
+    primary_windows = _transcript_word_intervals(primary_words)
+    additions = []
+    for word in fallback_words:
+        text = str(word.get("word") or word.get("text") or "").strip()
+        if _normalized_onset_word(text) not in ALIGNMENT_ADJUSTABLE_SHORT_VOCALIZATIONS:
+            continue
+        start = _safe_float(word.get("start"))
+        end = _safe_float(word.get("end"))
+        confidence = _safe_float(word.get("probability") or word.get("confidence"))
+        if start is None or end is None or end <= start:
+            continue
+        if confidence is not None and confidence < AUTO_VOCALIZATION_MIN_CONFIDENCE:
+            continue
+        if _existing_alignment_overlap_ratio(start, end, primary_windows) > AUTO_VOCALIZATION_MAX_EXISTING_OVERLAP_RATIO:
+            continue
+        additions.append(
+            {
+                **word,
+                "word": text,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "probability": round(confidence if confidence is not None else 0.6, 4),
+                "source": "fallback_vocalization",
+            }
+        )
+
+    if not additions:
+        return primary
+
+    merged = dict(primary)
+    merged["words"] = sorted(primary_words + additions, key=lambda item: (_safe_float(item.get("start")) or 0.0))
+    merged["merged_vocalization_words"] = len(additions)
+    return merged
+
+
+def _transcript_word_intervals(words: list[dict[str, Any]]) -> list[tuple[float, float]]:
+    intervals = []
+    for word in words:
+        start = _safe_float(word.get("start"))
+        end = _safe_float(word.get("end"))
+        if start is not None and end is not None and end > start:
+            intervals.append((start, end))
+    return intervals
 
 
 def _should_retry_transcription_with_lyrics_prompt(

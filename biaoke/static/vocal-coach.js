@@ -1658,6 +1658,8 @@
     const raw = rawGuide && typeof rawGuide === "object" ? rawGuide : {};
     const runtime = raw.runtime && typeof raw.runtime === "object" ? raw.runtime : {};
     const melody = raw.melody && typeof raw.melody === "object" ? raw.melody : {};
+    const referenceMelody =
+      raw.reference_melody && typeof raw.reference_melody === "object" ? raw.reference_melody : {};
     const quality = raw.quality && typeof raw.quality === "object" ? raw.quality : {};
     const assets = raw.assets && typeof raw.assets === "object" ? raw.assets : {};
     const notes = normalizeGuideNotes(raw);
@@ -1672,6 +1674,7 @@
       is_paused: Boolean(raw.is_paused ?? runtime.is_paused ?? false),
       quality_messages: raw.quality_messages || quality.messages || melody.quality_messages || [],
       guide_status: raw.guide_status || quality.status || raw.status,
+      reference_melody: referenceMelody,
       vocal_reference_available: Boolean(raw.vocal_reference_available || assets.original_audio_path),
       assets,
       notes,
@@ -1680,7 +1683,9 @@
   }
 
   function normalizeGuideNotes(raw) {
-    const directNotes = Array.isArray(raw?.notes)
+    const directNotes = Array.isArray(raw?.reference_melody?.notes)
+      ? raw.reference_melody.notes
+      : Array.isArray(raw?.notes)
       ? raw.notes
       : Array.isArray(raw?.melody?.notes)
         ? raw.melody.notes
@@ -1734,7 +1739,9 @@
   }
 
   function normalizeGuideContour(raw) {
-    const source = Array.isArray(raw?.contour)
+    const source = Array.isArray(raw?.reference_melody?.contour)
+      ? raw.reference_melody.contour
+      : Array.isArray(raw?.contour)
       ? raw.contour
       : Array.isArray(raw?.melody?.contour)
         ? raw.melody.contour
