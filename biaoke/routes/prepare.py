@@ -30,6 +30,11 @@ class EnqueueCoachBody(Schema):
     song_added_by = fields.String(load_default="", metadata={"description": "Requesting user"})
 
 
+class CoachTrackActionBody(Schema):
+    track_id = fields.Integer(required=True, metadata={"description": "Prepared coach track id"})
+    delete_files = fields.Boolean(load_default=True, metadata={"description": "Delete generated files"})
+
+
 @prepare_bp.route("/prepare", methods=["GET"])
 def prepare():
     """Coach preparation page."""
@@ -99,6 +104,34 @@ def enqueue_prepared_track(form):
             "using_instrumental": playable["using_instrumental"],
         }
     ), 200 if result[0] else 400
+
+
+@prepare_bp.route("/prepare/reanalyze", methods=["POST"])
+@prepare_bp.arguments(CoachTrackActionBody, location="json")
+def reanalyze_prepared_track(form):
+    """Queue a prepared coach track for a fresh guide generation."""
+    k = get_karaoke_instance()
+    try:
+        result = k.coach_preparation.reanalyze_track(int(form["track_id"]))
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    if not result:
+        return jsonify({"status": "error", "message": "Track preparado nao encontrado."}), 404
+    return jsonify({"status": "ok", **result})
+
+
+@prepare_bp.route("/prepare/delete", methods=["POST"])
+@prepare_bp.arguments(CoachTrackActionBody, location="json")
+def delete_prepared_track(form):
+    """Delete a prepared coach track and its generated files."""
+    k = get_karaoke_instance()
+    result = k.coach_preparation.delete_track(
+        int(form["track_id"]),
+        delete_files=bool(form.get("delete_files", True)),
+    )
+    if not result:
+        return jsonify({"status": "error", "message": "Track preparado nao encontrado."}), 404
+    return jsonify({"status": "ok", "message": "Musica removida do Coach.", **result})
 
 
 @prepare_bp.route("/prepare/status", methods=["GET"])

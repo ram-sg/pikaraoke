@@ -458,6 +458,7 @@ body {
   right: 0;
   bottom: 0;
   z-index: 5;
+  display: none;
   padding: 70px clamp(18px, 4vw, 56px) 38px;
   color: #f8f7ef;
   text-align: center;

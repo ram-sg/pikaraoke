@@ -9,7 +9,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]" python-multipart torchcrepe demucs
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" python-multipart torchcrepe demucs faster-whisper
 
 RUN mkdir -p /app/biaoke/lib /app/scoring_service && \
     touch /app/biaoke/__init__.py /app/biaoke/lib/__init__.py /app/scoring_service/__init__.py

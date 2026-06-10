@@ -343,6 +343,20 @@ class KaraokeDatabase:
             ).fetchone()
             return _row_to_dict(row) if row else None
 
+    def delete_coach_track(self, track_id: int) -> bool:
+        """Delete a coach track and its preparation metadata."""
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT id FROM coach_tracks WHERE id = ?",
+                (track_id,),
+            ).fetchone()
+            if not row:
+                return False
+            self._conn.execute("DELETE FROM coach_jobs WHERE track_id = ?", (track_id,))
+            self._conn.execute("DELETE FROM coach_assets WHERE track_id = ?", (track_id,))
+            self._conn.execute("DELETE FROM coach_tracks WHERE id = ?", (track_id,))
+            return True
+
     def find_coach_track_by_media_path(self, file_path: str) -> dict | None:
         """Return a coach track whose original/stem/queue path matches file_path."""
         with self._lock:
@@ -487,6 +501,7 @@ class KaraokeDatabase:
             "build_guide",
             "separate_stems",
             "extract_melody",
+            "align_lyrics",
             "write_coach_guide",
         )
         placeholders = ", ".join("?" for _ in analysis_stages)

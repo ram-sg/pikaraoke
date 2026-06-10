@@ -37,6 +37,12 @@ class StemSeparationRequest(BaseModel):
     model: str = DEFAULT_DEMUCS_MODEL
 
 
+class TranscriptRequest(BaseModel):
+    input_path: str
+    model: str = "medium"
+    language: str | None = None
+
+
 def _warm_up_scoring_engine() -> None:
     global _WARMED_UP
     try:
@@ -150,6 +156,57 @@ def separate_stems(request: StemSeparationRequest):
     }
 
 
+@app.post("/transcribe")
+def transcribe(request: TranscriptRequest):
+    input_path = _validated_media_path(request.input_path, must_exist=True)
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+    except Exception as exc:
+        raise HTTPException(
+            status_code=501,
+            detail="faster-whisper is not installed in the scoring service",
+        ) from exc
+
+    model_name = _safe_transcription_model(request.model)
+    device = _whisper_device()
+    compute_type = "float16" if device == "cuda" else "int8"
+    try:
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        segments, info = model.transcribe(
+            str(input_path),
+            language=request.language or None,
+            beam_size=5,
+            vad_filter=True,
+            word_timestamps=True,
+        )
+        words = []
+        for segment in segments:
+            for word in segment.words or []:
+                text = str(word.word or "").strip()
+                if not text:
+                    continue
+                words.append(
+                    {
+                        "word": text,
+                        "start": round(float(word.start), 3),
+                        "end": round(float(word.end), 3),
+                        "probability": round(float(word.probability or 0), 4),
+                    }
+                )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[-2000:]) from exc
+
+    return {
+        "status": "ready",
+        "engine": "faster-whisper",
+        "model": model_name,
+        "device": device,
+        "language": getattr(info, "language", request.language),
+        "language_probability": round(float(getattr(info, "language_probability", 0) or 0), 4),
+        "words": words,
+    }
+
+
 def _validated_media_path(raw_path: str, *, must_exist: bool) -> Path:
     path = Path(raw_path).expanduser()
     if must_exist:
@@ -181,6 +238,21 @@ def _demucs_device() -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
     except Exception:
         return "cpu"
+
+
+def _whisper_device() -> str:
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
+def _safe_transcription_model(model: str) -> str:
+    model = (model or "medium").strip()
+    allowed = {"tiny", "base", "small", "medium", "large-v2", "large-v3", "distil-large-v3"}
+    return model if model in allowed else "medium"
 
 
 def _find_stem_file(root: Path, filename: str) -> Path | None:

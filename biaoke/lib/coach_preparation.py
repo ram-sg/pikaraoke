@@ -13,10 +13,11 @@ import requests
 
 from biaoke.lib.events import EventSystem
 from biaoke.lib.karaoke_database import KaraokeDatabase
-from biaoke.lib.lyrics_alignment import with_lyrics_alignment
+from biaoke.lib.lyrics_alignment import with_vocal_activity_alignment
 from biaoke.lib.scoring import ScoreAnalysisError, extract_melody_guide_from_media
 from biaoke.lib.song_guide import write_song_guide
 from biaoke.lib.song_guide import guide_path_for_media
+from biaoke.lib.text_audio_alignment import build_word_alignment_from_transcript
 from biaoke.lib.youtube_dl import get_youtube_id_from_url
 
 
@@ -34,6 +35,8 @@ SCORING_SERVICE_ENV = "BIAOKE_SCORING_SERVICE_URL"
 SEPARATE_STEMS_ENV = "BIAOKE_COACH_SEPARATE_STEMS"
 DEMUCS_MODEL_ENV = "BIAOKE_COACH_DEMUCS_MODEL"
 STEMS_TIMEOUT_ENV = "BIAOKE_COACH_STEMS_TIMEOUT"
+TRANSCRIBE_TIMEOUT_ENV = "BIAOKE_COACH_TRANSCRIBE_TIMEOUT"
+TRANSCRIBE_MODEL_ENV = "BIAOKE_COACH_TRANSCRIBE_MODEL"
 PITCH_BANDS_CENTS = [25, 40, 60, 80, 100, 130, 160, 200, 250, 320]
 TIMING_BANDS_MS = [40, 70, 100, 140, 180, 230, 290, 360, 450, 600]
 LYRICS_DURATION_TOLERANCE_SECONDS = 12.0
@@ -277,6 +280,56 @@ class CoachPreparationManager:
                 }
         return None
 
+    def reanalyze_track(self, track_id: int) -> dict[str, Any] | None:
+        """Queue a prepared track for fresh coach analysis."""
+        track = self._db.get_coach_track(track_id)
+        if not track:
+            return None
+        assets = self._db.get_coach_assets(track_id)
+        media_path = _track_media_path(track, assets)
+        if not media_path or not media_path.is_file():
+            raise ValueError("Arquivo da musica nao encontrado para reprocessar.")
+
+        self._db.update_coach_track(
+            track_id,
+            status=PROCESSING_STATUS,
+            quality_status="unknown",
+            file_path=str(media_path),
+        )
+        job = self._db.create_coach_job(
+            track_id,
+            stage="analyze_pending",
+            status=QUEUED_STATUS,
+            progress=0,
+        )
+        return {"track": self.get_track_with_assets(track_id), "job": job}
+
+    def delete_track(self, track_id: int, *, delete_files: bool = True) -> dict[str, Any] | None:
+        """Delete a coach track and, when safe, its generated media files."""
+        track = self.get_track_with_assets(track_id)
+        if not track:
+            return None
+
+        deleted_paths = []
+        kept_paths = []
+        candidate_paths = _coach_file_paths(track)
+        if delete_files:
+            for candidate in candidate_paths:
+                result = _delete_coach_file(candidate, self._download_path)
+                if result == "deleted":
+                    deleted_paths.append(str(candidate))
+                elif result == "kept":
+                    kept_paths.append(str(candidate))
+
+        if deleted_paths:
+            self._db.delete_by_paths(deleted_paths)
+        self._db.delete_coach_track(track_id)
+        return {
+            "track": track,
+            "deleted_paths": deleted_paths,
+            "kept_paths": kept_paths,
+        }
+
     def load_coach_guide_for_media_path(self, file_path: str | Path) -> dict[str, Any] | None:
         """Load a .biaoke-coach.json package associated with a media path."""
         track = self.get_track_for_media_path(file_path)
@@ -348,13 +401,16 @@ class CoachPreparationManager:
             melody_source_path = Path(stems["vocals_path"]) if stems else media_path
             self._db.update_coach_job(job_id, stage="extract_melody", progress=55)
             melody_guide = _extract_coach_melody(melody_source_path)
-            self._db.update_coach_job(job_id, stage="write_coach_guide", progress=80)
+            self._db.update_coach_job(job_id, stage="align_lyrics", progress=72)
+            transcript = _transcribe_coach_vocals(melody_source_path)
+            self._db.update_coach_job(job_id, stage="write_coach_guide", progress=85)
             coach_guide_path = _write_coach_guide(
                 media_path,
                 lyrics_guide,
                 melody_guide,
                 stems=stems,
                 melody_source_path=melody_source_path,
+                transcript=transcript,
             )
         except (OSError, ScoreAnalysisError, ValueError) as exc:
             logging.warning("Coach analysis failed for %s: %s", media_path, exc)
@@ -399,6 +455,51 @@ def _track_media_path(track: dict[str, Any], assets: dict[str, Any] | None) -> P
     return None
 
 
+def _coach_file_paths(track: dict[str, Any]) -> list[Path]:
+    assets = track.get("assets") or {}
+    paths = [
+        track.get("file_path"),
+        assets.get("original_audio_path"),
+        assets.get("instrumental_audio_path"),
+        assets.get("vocal_reference_path"),
+        assets.get("guide_path"),
+        assets.get("lyrics_path"),
+    ]
+    unique_paths = []
+    seen = set()
+    for raw_path in paths:
+        if not raw_path:
+            continue
+        path = Path(str(raw_path))
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_paths.append(path)
+    return unique_paths
+
+
+def _delete_coach_file(path: Path, download_root: Path) -> str:
+    if not _path_is_inside(path, download_root):
+        return "kept"
+    try:
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            return "deleted"
+    except OSError as exc:
+        logging.warning("Failed to delete coach file %s: %s", path, exc)
+        return "kept"
+    return "missing"
+
+
+def _path_is_inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
 def _coach_guide_path(media_path: str | Path) -> Path:
     return Path(media_path).with_suffix(COACH_GUIDE_SUFFIX)
 
@@ -410,9 +511,17 @@ def _write_coach_guide(
     *,
     stems: dict[str, Any] | None = None,
     melody_source_path: str | Path | None = None,
+    transcript: dict[str, Any] | None = None,
 ) -> Path:
     path = _coach_guide_path(media_path)
-    lyrics = with_lyrics_alignment(lyrics_guide.get("lyrics") or {})
+    lyrics = with_vocal_activity_alignment(lyrics_guide.get("lyrics") or {}, melody_guide)
+    word_alignment = build_word_alignment_from_transcript(
+        lyrics_guide.get("lyrics") or {},
+        transcript.get("words") if isinstance(transcript, dict) else [],
+        method="faster_whisper_word_alignment",
+    )
+    if word_alignment:
+        lyrics["alignment"] = word_alignment
     payload = {
         "schema": COACH_GUIDE_SCHEMA,
         "version": COACH_GUIDE_VERSION,
@@ -422,6 +531,7 @@ def _write_coach_guide(
             "melody_source_path": str(melody_source_path or media_path),
         },
         "stems": stems or {"status": "missing", "message": "Vocal separado ainda nao foi gerado."},
+        "transcript": transcript or {"status": "missing", "message": "Transcricao vocal ainda nao foi gerada."},
         "lyrics": lyrics,
         "melody": melody_guide,
         "tasks": _build_pitch_tasks(lyrics_guide, melody_guide),
@@ -638,6 +748,48 @@ def _stems_timeout_seconds() -> int:
         return max(300, min(3600, int(raw_value or 1800)))
     except ValueError:
         return 1800
+
+
+def _transcribe_timeout_seconds() -> int:
+    raw_value = os.environ.get(TRANSCRIBE_TIMEOUT_ENV)
+    try:
+        return max(300, min(3600, int(raw_value or 1200)))
+    except ValueError:
+        return 1200
+
+
+def _transcribe_coach_vocals(media_path: Path) -> dict[str, Any] | None:
+    service_url = os.environ.get(SCORING_SERVICE_ENV, "").strip()
+    if not service_url:
+        return None
+    try:
+        return _transcribe_coach_vocals_with_service(service_url, media_path)
+    except requests.RequestException as exc:
+        logging.warning("Coach transcription service failed for %s: %s", media_path, exc)
+        return None
+
+
+def _transcribe_coach_vocals_with_service(service_url: str, media_path: Path) -> dict[str, Any]:
+    base_url = service_url.rsplit("/", 1)[0]
+    response = requests.post(
+        f"{base_url}/transcribe",
+        json={
+            "input_path": str(media_path),
+            "model": os.environ.get(TRANSCRIBE_MODEL_ENV, "medium"),
+        },
+        timeout=_transcribe_timeout_seconds(),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return {
+        "status": payload.get("status", "ready"),
+        "engine": payload.get("engine", "faster-whisper"),
+        "model": payload.get("model"),
+        "device": payload.get("device"),
+        "language": payload.get("language"),
+        "language_probability": payload.get("language_probability"),
+        "words": payload.get("words") or [],
+    }
 
 
 def _extract_coach_melody_with_service(service_url: str, media_path: Path) -> dict[str, Any]:

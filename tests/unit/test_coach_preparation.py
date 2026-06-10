@@ -139,6 +139,14 @@ def test_pending_analysis_writes_coach_guide_and_marks_ready(tmp_path):
             "biaoke.lib.coach_preparation._extract_coach_melody",
             return_value=melody_guide,
         ) as melody_mock,
+        patch(
+            "biaoke.lib.coach_preparation._transcribe_coach_vocals",
+            return_value={
+                "status": "ready",
+                "engine": "faster-whisper",
+                "words": [{"word": "hello", "start": 0.12, "end": 0.65, "probability": 0.94}],
+            },
+        ) as transcribe_mock,
     ):
         assert manager.run_pending_analysis_once() is True
 
@@ -153,14 +161,78 @@ def test_pending_analysis_writes_coach_guide_and_marks_ready(tmp_path):
     assert assets["vocal_reference_path"] == str(tmp_path / "vocals.wav")
     assert assets["instrumental_audio_path"] == str(tmp_path / "instrumental.wav")
     melody_mock.assert_called_once_with(tmp_path / "vocals.wav")
+    transcribe_mock.assert_called_once_with(tmp_path / "vocals.wav")
 
     with open(assets["guide_path"], encoding="utf-8") as handle:
         coach_guide = json.load(handle)
 
     assert coach_guide["schema"] == "biaoke.coach_guide"
     assert coach_guide["stems"]["engine"] == "demucs"
+    assert coach_guide["transcript"]["engine"] == "faster-whisper"
+    assert coach_guide["lyrics"]["alignment"]["granularity"] == "word"
+    assert coach_guide["lyrics"]["alignment"]["paint_units"][0]["start"] == 0.12
     assert coach_guide["tasks"][0]["target_midi"] == 60
     assert coach_guide["tasks"][0]["text"] == "hello"
+    db.close()
+
+
+def test_reanalyze_track_queues_fresh_analysis(tmp_path):
+    media_path = tmp_path / "Artist - Song---abc12345678.mp4"
+    media_path.write_bytes(b"fake media")
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    result = manager.register_local_file(str(media_path))
+
+    reanalysis = manager.reanalyze_track(result["track"]["id"])
+
+    assert reanalysis is not None
+    assert reanalysis["track"]["status"] == "processing"
+    assert reanalysis["job"]["stage"] == "analyze_pending"
+    assert reanalysis["job"]["status"] == "queued"
+    db.close()
+
+
+def test_delete_track_removes_generated_files_and_metadata(tmp_path):
+    media_path = tmp_path / "Artist - Song---abc12345678.mp4"
+    guide_path = tmp_path / "Artist - Song---abc12345678.biaoke-coach.json"
+    lyrics_path = tmp_path / "Artist - Song---abc12345678.biaoke-guide.json"
+    stems_dir = tmp_path / ".biaoke-stems"
+    stems_dir.mkdir()
+    vocals_path = stems_dir / "Artist - Song---abc12345678.vocals.wav"
+    instrumental_path = stems_dir / "Artist - Song---abc12345678.instrumental.wav"
+    for path in (media_path, guide_path, lyrics_path, vocals_path, instrumental_path):
+        path.write_bytes(b"fake")
+
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    result = manager.register_local_file(str(media_path))
+    track_id = result["track"]["id"]
+    db.set_coach_assets(
+        track_id,
+        original_audio_path=str(media_path),
+        instrumental_audio_path=str(instrumental_path),
+        vocal_reference_path=str(vocals_path),
+        guide_path=str(guide_path),
+        lyrics_path=str(lyrics_path),
+    )
+
+    deleted = manager.delete_track(track_id)
+
+    assert deleted is not None
+    assert db.get_coach_track(track_id) is None
+    assert db.get_coach_assets(track_id) is None
+    for path in (media_path, guide_path, lyrics_path, vocals_path, instrumental_path):
+        assert not path.exists()
     db.close()
 
 

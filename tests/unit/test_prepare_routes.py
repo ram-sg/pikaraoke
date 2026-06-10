@@ -85,3 +85,45 @@ def test_prepare_enqueue_route_queues_playable_coach_asset():
         "Ramon",
         title="Artist - Song",
     )
+
+
+def test_prepare_reanalyze_route_queues_track():
+    app = Flask(__name__)
+    app.register_blueprint(prepare_bp)
+    client = app.test_client()
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.coach_preparation.reanalyze_track.return_value = {
+        "track": {"id": 7, "status": "processing"},
+        "job": {"id": 8, "stage": "analyze_pending"},
+    }
+
+    with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
+        response = client.post("/prepare/reanalyze", json={"track_id": 7})
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data["status"] == "ok"
+    mock_karaoke.coach_preparation.reanalyze_track.assert_called_once_with(7)
+
+
+def test_prepare_delete_route_removes_track():
+    app = Flask(__name__)
+    app.register_blueprint(prepare_bp)
+    client = app.test_client()
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.coach_preparation.delete_track.return_value = {
+        "track": {"id": 7},
+        "deleted_paths": ["/songs/song.mp4"],
+        "kept_paths": [],
+    }
+
+    with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
+        response = client.post("/prepare/delete", json={"track_id": 7, "delete_files": True})
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data["status"] == "ok"
+    assert data["message"] == "Musica removida do Coach."
+    mock_karaoke.coach_preparation.delete_track.assert_called_once_with(7, delete_files=True)

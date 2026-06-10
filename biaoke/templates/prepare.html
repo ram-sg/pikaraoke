@@ -61,6 +61,13 @@
     white-space: nowrap;
   }
 
+  .prepare-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
   @media screen and (max-width: 680px) {
     .prepare-result {
       grid-template-columns: 1fr;
@@ -133,6 +140,65 @@
           var data = xhr.responseJSON || {};
           button.removeClass("is-loading").addClass("is-danger").text("Erro");
           showNotification(data.message || "Nao foi possivel adicionar", "is-danger");
+          setTimeout(function () {
+            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
+          }, 2500);
+        },
+      });
+    });
+
+    $(".reanalyze-coach-button").on("click", function () {
+      var button = $(this);
+      var originalText = button.text();
+      button.addClass("is-loading").attr("disabled", true);
+      $.ajax({
+        url: "{{ url_for('prepare.reanalyze_prepared_track') }}",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          track_id: Number(button.data("track-id")),
+        }),
+        success: function () {
+          button.removeClass("is-loading").addClass("is-success").text("Reprocessando");
+          setTimeout(function () {
+            window.location.reload();
+          }, 700);
+        },
+        error: function (xhr) {
+          var data = xhr.responseJSON || {};
+          button.removeClass("is-loading").addClass("is-danger").text("Erro");
+          showNotification(data.message || "Nao foi possivel reprocessar", "is-danger");
+          setTimeout(function () {
+            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
+          }, 2500);
+        },
+      });
+    });
+
+    $(".delete-coach-button").on("click", function () {
+      if (!window.confirm("Remover esta musica preparada e os arquivos gerados?")) return;
+      var button = $(this);
+      var originalText = button.text();
+      button.addClass("is-loading").attr("disabled", true);
+      $.ajax({
+        url: "{{ url_for('prepare.delete_prepared_track') }}",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          track_id: Number(button.data("track-id")),
+          delete_files: true,
+        }),
+        success: function (data) {
+          button.removeClass("is-loading").addClass("is-success").text("Removida");
+          showNotification(data.message || "Musica removida", "is-success");
+          setTimeout(function () {
+            window.location.reload();
+          }, 700);
+        },
+        error: function (xhr) {
+          var data = xhr.responseJSON || {};
+          button.removeClass("is-loading").addClass("is-danger").text("Erro");
+          showNotification(data.message || "Nao foi possivel remover", "is-danger");
           setTimeout(function () {
             button.removeClass("is-danger").removeAttr("disabled").text(originalText);
           }, 2500);
@@ -229,9 +295,15 @@
         </div>
         {% endif %}
         {% if track.status == 'ready' and track.assets and track.assets.guide_path and (track.assets.instrumental_audio_path or track.assets.original_audio_path) %}
-        <div>
+        <div class="prepare-actions">
           <button class="button is-small is-primary queue-coach-button" data-track-id="{{ track.id }}">
             Cantar no Coach
+          </button>
+          <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
+            Reprocessar
+          </button>
+          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+            Excluir
           </button>
           {% if track.assets.instrumental_audio_path %}
           <span class="tag is-success is-light">instrumental pronto</span>
@@ -240,8 +312,29 @@
           {% endif %}
         </div>
         {% elif track.status == 'needs_review' %}
-        <div>
+        <div class="prepare-actions">
+          <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
+            Reprocessar
+          </button>
+          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+            Excluir
+          </button>
           <span class="tag is-warning is-light">precisa revisão</span>
+        </div>
+        {% elif track.status == 'failed' %}
+        <div class="prepare-actions">
+          <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
+            Reprocessar
+          </button>
+          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+            Excluir
+          </button>
+        </div>
+        {% elif track.status not in ['queued', 'processing'] %}
+        <div class="prepare-actions">
+          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+            Excluir
+          </button>
         </div>
         {% endif %}
       </div>
