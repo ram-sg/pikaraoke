@@ -189,6 +189,7 @@ def parse_ass_lyrics(content: str) -> tuple[list[dict[str, Any]], bool]:
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "text": text,
+                "has_karaoke_timing": line_has_karaoke_timing,
                 "segments": segments,
             }
         )
@@ -239,6 +240,7 @@ def parse_lrc_lyrics(
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "text": text,
+                "has_karaoke_timing": False,
                 "segments": _tokenize_line_text(text, start, end),
             }
         )

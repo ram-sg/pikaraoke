@@ -142,6 +142,7 @@
     playbackPositionTimer: null,
     nowPlayingPollTimer: null,
     lyrics: [],
+    lyricsHaveKaraokeTiming: false,
     lyricsOffsetSeconds: 0,
     activeLyricIndex: -1,
     lastLoadedSubtitleUrl: null,
@@ -920,6 +921,10 @@
     });
   }
 
+  function hasKaraokeTimingText(text) {
+    return /\{[^}]*\\k[fo]?\d+[^}]*\}/i.test(String(text || ""));
+  }
+
   function parseAssLyrics(content) {
     const lines = String(content || "").split(/\r?\n/);
     let inEvents = false;
@@ -966,11 +971,13 @@
       const text = event.Text || "";
       const plain = stripAssTags(text);
       if (!plain) continue;
+      const lineHasKaraokeTiming = hasKaraokeTimingText(text);
 
       lyrics.push({
         start,
         end,
         text: plain,
+        has_karaoke_timing: lineHasKaraokeTiming,
         segments: parseKaraokeSegments(text, start, end),
       });
     }
@@ -981,7 +988,12 @@
   function renderLyricLine(container, line, time) {
     container.replaceChildren();
     if (!line) return;
-    const segments = line.segments?.length ? line.segments : tokenizeLineText(line.text, line.start, line.end);
+    const hasPreciseTiming =
+      state.lyricsHaveKaraokeTiming && (line.has_karaoke_timing !== false);
+    const segments =
+      hasPreciseTiming && line.segments?.length
+        ? line.segments
+        : [{ text: line.text, start: line.start, end: line.end }];
     for (const segment of segments) {
       const token = document.createElement("span");
       token.className = "coach-lyric-token";
@@ -1040,6 +1052,7 @@
 
   async function loadLyrics(subtitleUrl) {
     state.lyrics = [];
+    state.lyricsHaveKaraokeTiming = false;
     state.activeLyricIndex = -1;
     state.currentSubtitleUrl = subtitleUrl || null;
     els["coach-lyrics-current"].replaceChildren();
@@ -1064,6 +1077,7 @@
       if (!response.ok) throw new Error(`Subtitle request failed: ${response.status}`);
       const content = await response.text();
       state.lyrics = parseAssLyrics(content);
+      state.lyricsHaveKaraokeTiming = hasKaraokeTimingText(content);
       state.activeLyricIndex = -1;
       if (state.lyrics.length === 0) {
         setLyricsStatus(TEXT.noLyrics, "is-warning");
@@ -1073,6 +1087,7 @@
     } catch (error) {
       console.log("Could not load lyrics", error);
       state.lyrics = [];
+      state.lyricsHaveKaraokeTiming = false;
       state.activeLyricIndex = -1;
       setLyricsStatus(TEXT.lyricsError, "is-danger");
     }
@@ -1094,17 +1109,20 @@
       }
       if (qualityMessages.includes("lyrics_duration_mismatch")) {
         state.lyrics = [];
+        state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
         setLyricsStatus(TEXT.lyricsMismatch, "is-danger");
         return true;
       }
       if (guide.status !== "ready" || !Array.isArray(guide.lines) || guide.lines.length === 0) {
         state.lyrics = [];
+        state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
         setLyricsStatus(guide.message || TEXT.noLyrics, guide.status === "error" ? "is-danger" : "is-warning");
         return true;
       }
       state.lyrics = guide.lines;
+      state.lyricsHaveKaraokeTiming = Boolean(guide.has_karaoke_timing);
       state.activeLyricIndex = -1;
       setLyricsStatus(TEXT.lyricsReady, "is-ready");
       return true;
@@ -1970,41 +1988,159 @@
     );
   }
 
-  function drawStageLyricRail(ctx, width, xForTime, songTime, railY) {
-    const line = activeLyricLineAt(songTime);
-    if (!line) return;
-
-    const segments = line.segments?.length ? line.segments : tokenizeLineText(line.text, line.start, line.end);
+  function visibleLyricSegments(minTime, maxTime) {
     const offset = Number(state.lyricsOffsetSeconds || 0);
-    const railH = 9;
+    const segments = [];
+    state.lyrics.forEach((line, lineIndex) => {
+      const lineStart = Number(line.start) + offset;
+      const lineEnd = Number(line.end) + offset;
+      const lineText = String(line.text || "").trim();
+      const hasPreciseTiming =
+        state.lyricsHaveKaraokeTiming && line.has_karaoke_timing !== false && line.segments?.length;
 
-    for (const segment of segments) {
-      const start = Number(segment.start) + offset;
-      const end = Number(segment.end) + offset;
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+      if (!hasPreciseTiming) {
+        if (
+          lineText &&
+          Number.isFinite(lineStart) &&
+          Number.isFinite(lineEnd) &&
+          lineEnd > lineStart &&
+          lineEnd >= minTime &&
+          lineStart <= maxTime
+        ) {
+          segments.push({
+            start: lineStart,
+            end: lineEnd,
+            text: lineText,
+            lineIndex,
+            segmentIndex: 0,
+            precision: "line",
+          });
+        }
+        return;
+      }
 
-      const x1 = xForTime(start);
-      const x2 = xForTime(end);
-      const blockX = Math.max(-14, x1);
-      const blockW = Math.min(width + 28, Math.max(4, x2 - x1));
-      const isDone = songTime >= end;
-      const isActive = songTime >= start && songTime < end;
+      const lineSegments = line.segments;
+      lineSegments.forEach((segment, segmentIndex) => {
+        const start = Number(segment.start) + offset;
+        const end = Number(segment.end) + offset;
+        const text = String(segment.text || "").trim();
+        if (!text || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+        if (end < minTime || start > maxTime) return;
+        segments.push({
+          start,
+          end,
+          text,
+          lineIndex,
+          segmentIndex,
+          precision: "karaoke",
+        });
+      });
+    });
+    return segments.sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
+  }
+
+  function lyricFontForWidth(ctx, text, maxWidth, baseSize = 22, minSize = 11) {
+    const cleanText = String(text || "").trim();
+    let size = baseSize;
+    while (size > minSize) {
+      ctx.font = `900 ${size}px sans-serif`;
+      if (ctx.measureText(cleanText).width <= maxWidth) return size;
+      size -= 1;
+    }
+    return minSize;
+  }
+
+  function drawLyricSegmentText(ctx, segment, x1, x2, textY, songTime, hitX) {
+    const slotWidth = x2 - x1;
+    const isActive = songTime >= segment.start && songTime < segment.end;
+    if (slotWidth < 18 && !isActive) return;
+
+    const textPadding = 4;
+    const safeWidth = Math.max(10, slotWidth - textPadding * 2);
+    const fontSize = lyricFontForWidth(ctx, segment.text, safeWidth);
+    const textX = x1 + textPadding;
+    const clipTop = textY - fontSize * 0.82;
+    const clipHeight = fontSize * 1.7;
+    ctx.font = `900 ${fontSize}px sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x1, clipTop, Math.max(1, slotWidth), clipHeight);
+    ctx.clip();
+    ctx.fillStyle = songTime >= segment.end ? "rgba(18, 199, 156, 0.96)" : "rgba(246, 243, 234, 0.72)";
+    ctx.fillText(segment.text, textX, textY);
+    ctx.restore();
+
+    if (songTime < segment.start || songTime >= segment.end) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x1, clipTop, Math.max(1, clamp(hitX, x1, x2) - x1), clipHeight);
+    ctx.clip();
+    ctx.fillStyle = "rgba(18, 199, 156, 1)";
+    ctx.fillText(segment.text, textX, textY);
+    ctx.restore();
+  }
+
+  function drawStageLyricRail(ctx, width, xForTime, songTime, railY, minTime, maxTime, hitX) {
+    if (!state.lyrics.length) return;
+
+    const segments = visibleLyricSegments(minTime, maxTime);
+    if (segments.length === 0) return;
+
+    const railH = 8;
+    const railTop = railY - 11;
+    const textY = railY + 8;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(3, 6, 10, 0.46)";
+    drawRoundRect(ctx, 0, railTop - 8, width, 42, 0);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(246, 243, 234, 0.14)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, railY);
+    ctx.lineTo(width, railY);
+    ctx.stroke();
+
+    segments.forEach((segment) => {
+      const x1 = xForTime(segment.start);
+      const x2 = xForTime(segment.end);
+      if (x2 < -20 || x1 > width + 20) return;
+
+      const blockX = Math.max(-20, x1);
+      const blockW = Math.min(width + 40, Math.max(5, x2 - x1));
+      const isDone = songTime >= segment.end;
+      const isActive = songTime >= segment.start && songTime < segment.end;
 
       ctx.fillStyle = isDone
-        ? "rgba(18, 199, 156, 0.72)"
+        ? "rgba(18, 199, 156, 0.44)"
         : isActive
-          ? "rgba(237, 176, 73, 0.74)"
-          : "rgba(246, 243, 234, 0.26)";
-      drawRoundRect(ctx, blockX, railY, blockW, railH, 4);
+          ? "rgba(237, 176, 73, 0.62)"
+          : "rgba(246, 243, 234, 0.14)";
+      drawRoundRect(ctx, blockX, railTop, blockW, railH, 4);
       ctx.fill();
 
       if (isActive) {
-        const progress = clamp((songTime - start) / Math.max(0.03, end - start), 0, 1);
-        ctx.fillStyle = "rgba(18, 199, 156, 0.92)";
-        drawRoundRect(ctx, blockX, railY, blockW * progress, railH, 4);
+        ctx.fillStyle = "rgba(18, 199, 156, 0.88)";
+        drawRoundRect(ctx, blockX, railTop, Math.max(1, clamp(hitX, x1, x2) - x1), railH, 4);
         ctx.fill();
       }
-    }
+
+      drawLyricSegmentText(ctx, segment, x1, x2, textY, songTime, hitX);
+    });
+
+    ctx.fillStyle = "rgba(246, 243, 234, 0.72)";
+    ctx.font = "800 11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText("agora", hitX, railTop - 10);
+    ctx.restore();
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
   }
 
   function visibleRoadNotes(notes, minTime, maxTime) {
@@ -2421,7 +2557,7 @@
       ctx.stroke();
     }
 
-    drawStageLyricRail(ctx, width, xForTime, songTime, layout.railY);
+    drawStageLyricRail(ctx, width, xForTime, songTime, layout.railY, minTime, maxTime, hitX);
     ctx.restore();
   }
 

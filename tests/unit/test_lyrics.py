@@ -39,6 +39,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Hello world
             "start": 1.0,
             "end": 3.0,
             "text": "Hello world",
+            "has_karaoke_timing": False,
             "segments": [
                 {"text": "Hello ", "start": 1.0, "end": 2.0},
                 {"text": "world", "start": 2.0, "end": 3.0},
@@ -58,6 +59,7 @@ Dialogue: 0:00:05.00,0:00:07.00,{\k50}Hel{\k150}lo
 
     assert has_karaoke_timing is True
     assert lines[0]["text"] == "Hello"
+    assert lines[0]["has_karaoke_timing"] is True
     assert lines[0]["segments"] == [
         {"text": "Hel ", "start": 5.0, "end": 5.5},
         {"text": "lo", "start": 5.5, "end": 7.0},
@@ -110,4 +112,5 @@ def test_build_lyrics_guide_from_lrc():
     assert guide["source"] == "lrclib"
     assert guide["source_format"] == "lrc"
     assert guide["line_count"] == 2
+    assert guide["lines"][0]["has_karaoke_timing"] is False
     assert guide["source_metadata"]["id"] == 123
