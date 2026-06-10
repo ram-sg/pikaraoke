@@ -83,6 +83,9 @@ Dialogue: 0:00:01.00,0:00:02.00,Line one
     assert guide["source"] == "sidecar_ass"
     assert guide["line_count"] == 1
     assert guide["lines"][0]["text"] == "Line one"
+    assert guide["alignment"]["schema"] == "biaoke.lyrics_alignment"
+    assert guide["alignment"]["granularity"] == "line"
+    assert guide["alignment"]["paint_units"][0]["unit_type"] == "line"
 
 
 def test_parse_lrc_lyrics():
@@ -113,4 +116,46 @@ def test_build_lyrics_guide_from_lrc():
     assert guide["source_format"] == "lrc"
     assert guide["line_count"] == 2
     assert guide["lines"][0]["has_karaoke_timing"] is False
+    assert guide["alignment"]["granularity"] == "line"
+    assert [unit["text"] for unit in guide["alignment"]["paint_units"]] == ["Line one", "Line two"]
     assert guide["source_metadata"]["id"] == 123
+
+
+def test_build_lyrics_guide_from_ass_uses_karaoke_paint_units(tmp_path):
+    subtitle = tmp_path / "song.ass"
+    subtitle.write_text(
+        r"""
+[Events]
+Format: Start, End, Text
+Dialogue: 0:00:05.00,0:00:07.00,{\k50}Hel{\k150}lo
+""",
+        encoding="utf-8",
+    )
+
+    guide = build_lyrics_guide_from_ass(subtitle)
+
+    assert guide["has_karaoke_timing"] is True
+    assert guide["alignment"]["method"] == "source_karaoke_timing"
+    assert guide["alignment"]["granularity"] == "segment"
+    assert guide["alignment"]["paint_units"] == [
+        {
+            "confidence": 0.9,
+            "end": 5.5,
+            "line_index": 0,
+            "precision": "source_karaoke",
+            "start": 5.0,
+            "text": "Hel",
+            "unit_index": 0,
+            "unit_type": "segment",
+        },
+        {
+            "confidence": 0.9,
+            "end": 7.0,
+            "line_index": 0,
+            "precision": "source_karaoke",
+            "start": 5.5,
+            "text": "lo",
+            "unit_index": 1,
+            "unit_type": "segment",
+        },
+    ]

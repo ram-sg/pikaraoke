@@ -11,6 +11,7 @@ from typing import Any
 from biaoke.lib.ffmpeg import get_media_duration
 from biaoke.lib.file_resolver import find_ass_subtitle_for_media
 from biaoke.lib.lyrics import build_lyrics_guide_from_ass
+from biaoke.lib.lyrics_alignment import with_lyrics_alignment
 from biaoke.lib.lyrics_sources import find_external_lyrics_for_media, infer_song_identity
 
 GUIDE_SCHEMA = "biaoke.song_guide"
@@ -56,6 +57,8 @@ def build_song_guide(media_path: str | Path) -> dict[str, Any]:
                 "lines": [],
                 "message": "Letra sincronizada ainda nao foi gerada para esta musica.",
             }
+
+    lyrics = with_lyrics_alignment(lyrics)
 
     messages = []
     if lyrics.get("status") != "ready":

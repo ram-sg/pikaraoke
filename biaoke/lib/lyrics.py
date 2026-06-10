@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from biaoke.lib.lyrics_alignment import with_lyrics_alignment
+
 
 _ASS_TIME_RE = re.compile(r"^(\d+):(\d{1,2}):(\d{1,2})(?:[.](\d{1,2}))?$")
 _LRC_TIME_RE = re.compile(r"^(\d+):(\d{1,2})(?:[.:](\d{1,3}))?$")
@@ -254,7 +256,7 @@ def build_lyrics_guide_from_ass(path: str | Path) -> dict[str, Any]:
     content = subtitle_path.read_text(encoding="utf-8-sig", errors="replace")
     lines, has_karaoke_timing = parse_ass_lyrics(content)
     confidence = 0.9 if has_karaoke_timing else 0.7
-    return {
+    guide = {
         "status": "ready" if lines else "missing",
         "source": "sidecar_ass",
         "source_format": "ass",
@@ -263,6 +265,7 @@ def build_lyrics_guide_from_ass(path: str | Path) -> dict[str, Any]:
         "line_count": len(lines),
         "lines": lines,
     }
+    return with_lyrics_alignment(guide)
 
 
 def build_lyrics_guide_from_lrc(
@@ -286,4 +289,4 @@ def build_lyrics_guide_from_lrc(
     }
     if source_metadata:
         guide["source_metadata"] = source_metadata
-    return guide
+    return with_lyrics_alignment(guide)

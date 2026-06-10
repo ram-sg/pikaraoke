@@ -119,6 +119,7 @@ Dialogue: 0:00:01.00,0:00:03.00,Primeira linha
     assert data["is_paused"] is True
     assert data["lyrics_offset_seconds"] == 0
     assert data["lines"][0]["text"] == "Primeira linha"
+    assert data["alignment"]["paint_units"][0]["text"] == "Primeira linha"
     assert (tmp_path / "song.biaoke-guide.json").exists()
 
 
@@ -273,6 +274,7 @@ def test_current_routes_use_prepared_coach_package_for_playing_stem(tmp_path):
     assert lyrics["coach_track_id"] == 42
     assert lyrics["quality_messages"] == ["line_timing_only"]
     assert lyrics["lines"][0]["text"] == "Primeira linha"
+    assert lyrics["alignment"]["paint_units"][0]["unit_type"] == "line"
     assert melody["coach_track_id"] == 42
     assert melody["quality_messages"] == ["line_timing_only"]
     assert melody["notes"][0]["midi"] == 61

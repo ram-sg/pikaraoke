@@ -13,6 +13,7 @@ import requests
 
 from biaoke.lib.events import EventSystem
 from biaoke.lib.karaoke_database import KaraokeDatabase
+from biaoke.lib.lyrics_alignment import with_lyrics_alignment
 from biaoke.lib.scoring import ScoreAnalysisError, extract_melody_guide_from_media
 from biaoke.lib.song_guide import write_song_guide
 from biaoke.lib.song_guide import guide_path_for_media
@@ -411,6 +412,7 @@ def _write_coach_guide(
     melody_source_path: str | Path | None = None,
 ) -> Path:
     path = _coach_guide_path(media_path)
+    lyrics = with_lyrics_alignment(lyrics_guide.get("lyrics") or {})
     payload = {
         "schema": COACH_GUIDE_SCHEMA,
         "version": COACH_GUIDE_VERSION,
@@ -420,7 +422,7 @@ def _write_coach_guide(
             "melody_source_path": str(melody_source_path or media_path),
         },
         "stems": stems or {"status": "missing", "message": "Vocal separado ainda nao foi gerado."},
-        "lyrics": lyrics_guide.get("lyrics") or {},
+        "lyrics": lyrics,
         "melody": melody_guide,
         "tasks": _build_pitch_tasks(lyrics_guide, melody_guide),
         "quality": {

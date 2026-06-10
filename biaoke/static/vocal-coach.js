@@ -142,6 +142,7 @@
     playbackPositionTimer: null,
     nowPlayingPollTimer: null,
     lyrics: [],
+    lyricPaintUnits: [],
     lyricsHaveKaraokeTiming: false,
     lyricsOffsetSeconds: 0,
     activeLyricIndex: -1,
@@ -1052,6 +1053,7 @@
 
   async function loadLyrics(subtitleUrl) {
     state.lyrics = [];
+    state.lyricPaintUnits = [];
     state.lyricsHaveKaraokeTiming = false;
     state.activeLyricIndex = -1;
     state.currentSubtitleUrl = subtitleUrl || null;
@@ -1077,6 +1079,7 @@
       if (!response.ok) throw new Error(`Subtitle request failed: ${response.status}`);
       const content = await response.text();
       state.lyrics = parseAssLyrics(content);
+      state.lyricPaintUnits = [];
       state.lyricsHaveKaraokeTiming = hasKaraokeTimingText(content);
       state.activeLyricIndex = -1;
       if (state.lyrics.length === 0) {
@@ -1087,6 +1090,7 @@
     } catch (error) {
       console.log("Could not load lyrics", error);
       state.lyrics = [];
+      state.lyricPaintUnits = [];
       state.lyricsHaveKaraokeTiming = false;
       state.activeLyricIndex = -1;
       setLyricsStatus(TEXT.lyricsError, "is-danger");
@@ -1109,6 +1113,7 @@
       }
       if (qualityMessages.includes("lyrics_duration_mismatch")) {
         state.lyrics = [];
+        state.lyricPaintUnits = [];
         state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
         setLyricsStatus(TEXT.lyricsMismatch, "is-danger");
@@ -1116,12 +1121,16 @@
       }
       if (guide.status !== "ready" || !Array.isArray(guide.lines) || guide.lines.length === 0) {
         state.lyrics = [];
+        state.lyricPaintUnits = [];
         state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
         setLyricsStatus(guide.message || TEXT.noLyrics, guide.status === "error" ? "is-danger" : "is-warning");
         return true;
       }
       state.lyrics = guide.lines;
+      state.lyricPaintUnits = Array.isArray(guide.alignment?.paint_units)
+        ? guide.alignment.paint_units
+        : [];
       state.lyricsHaveKaraokeTiming = Boolean(guide.has_karaoke_timing);
       state.activeLyricIndex = -1;
       setLyricsStatus(TEXT.lyricsReady, "is-ready");
@@ -1990,6 +1999,28 @@
 
   function visibleLyricSegments(minTime, maxTime) {
     const offset = Number(state.lyricsOffsetSeconds || 0);
+    if (Array.isArray(state.lyricPaintUnits) && state.lyricPaintUnits.length > 0) {
+      return state.lyricPaintUnits
+        .map((unit, unitIndex) => {
+          const start = Number(unit.start) + offset;
+          const end = Number(unit.end) + offset;
+          const text = String(unit.text || "").trim();
+          if (!text || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+          if (end < minTime || start > maxTime) return null;
+          return {
+            start,
+            end,
+            text,
+            lineIndex: Number(unit.line_index ?? 0),
+            segmentIndex: Number(unit.unit_index ?? unitIndex),
+            precision: String(unit.precision || unit.unit_type || "alignment"),
+            unitType: String(unit.unit_type || "unit"),
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
+    }
+
     const segments = [];
     state.lyrics.forEach((line, lineIndex) => {
       const lineStart = Number(line.start) + offset;

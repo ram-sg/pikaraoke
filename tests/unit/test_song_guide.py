@@ -111,6 +111,8 @@ def test_build_song_guide_uses_external_synced_lyrics(mock_external, tmp_path):
     guide = build_song_guide(media)
 
     assert guide["lyrics"]["source"] == "lrclib"
+    assert guide["lyrics"]["alignment"]["granularity"] == "line"
+    assert guide["lyrics"]["alignment"]["paint_units"][0]["text"] == "Line"
     assert guide["metadata"]["artist_name"] == "Adele"
     assert guide["metadata"]["track_name"] == "Hello"
     assert guide["quality"]["status"] == "ready"

@@ -12,6 +12,7 @@ import requests
 from flask import Blueprint, jsonify, request, send_file
 
 from biaoke.lib.current_app import get_karaoke_instance
+from biaoke.lib.lyrics_alignment import with_lyrics_alignment
 from biaoke.lib.scoring import (
     ScoreAnalysisError,
     analyze_upload_bytes,
@@ -153,7 +154,7 @@ def current_lyrics_guide():
 
     coach_guide = _get_coach_guide_for_path(k, path)
     if coach_guide:
-        lyrics = deepcopy(coach_guide.get("lyrics") or {})
+        lyrics = with_lyrics_alignment(deepcopy(coach_guide.get("lyrics") or {}))
         quality = coach_guide.get("quality") or {}
         lyrics.setdefault("status", "missing")
         lyrics.setdefault("lines", [])
@@ -185,7 +186,7 @@ def current_lyrics_guide():
             }
         ), 500
 
-    lyrics = deepcopy(guide.get("lyrics") or {})
+    lyrics = with_lyrics_alignment(deepcopy(guide.get("lyrics") or {}))
     lyrics.setdefault("status", "missing")
     lyrics.setdefault("lines", [])
     lyrics.update(
