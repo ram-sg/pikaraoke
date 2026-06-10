@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import json
 import os
+import re
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
@@ -41,6 +42,16 @@ PITCH_BANDS_CENTS = [25, 40, 60, 80, 100, 130, 160, 200, 250, 320]
 TIMING_BANDS_MS = [40, 70, 100, 140, 180, 230, 290, 360, 450, 600]
 LYRICS_DURATION_TOLERANCE_SECONDS = 12.0
 LYRICS_DURATION_TOLERANCE_RATIO = 0.08
+VOCAL_FILTER_LEAD_SECONDS = 0.12
+VOCAL_FILTER_TAIL_SECONDS = 0.65
+VOCAL_FILTER_MAX_SUSTAIN_EXTENSION_SECONDS = 5.0
+VOCAL_FILTER_MERGE_GAP_SECONDS = 1.4
+VOCAL_FILTER_MIN_WORD_CONFIDENCE = 0.25
+VOCAL_FILTER_MIN_NOTE_SECONDS = 0.14
+VOCAL_FILTER_LINE_BASE_SECONDS = 1.0
+VOCAL_FILTER_LINE_SECONDS_PER_WORD = 0.8
+VOCAL_FILTER_LINE_MIN_SECONDS = 2.6
+VOCAL_FILTER_VERSION = 3
 
 
 class CoachPreparationManager:
@@ -403,6 +414,11 @@ class CoachPreparationManager:
             melody_guide = _extract_coach_melody(melody_source_path)
             self._db.update_coach_job(job_id, stage="align_lyrics", progress=72)
             transcript = _transcribe_coach_vocals(melody_source_path)
+            melody_guide = _filter_melody_to_vocal_windows(
+                melody_guide,
+                lyrics_guide.get("lyrics") or {},
+                transcript,
+            )
             self._db.update_coach_job(job_id, stage="write_coach_guide", progress=85)
             coach_guide_path = _write_coach_guide(
                 media_path,
@@ -514,6 +530,11 @@ def _write_coach_guide(
     transcript: dict[str, Any] | None = None,
 ) -> Path:
     path = _coach_guide_path(media_path)
+    melody_guide = _filter_melody_to_vocal_windows(
+        melody_guide,
+        lyrics_guide.get("lyrics") or {},
+        transcript,
+    )
     lyrics = with_vocal_activity_alignment(lyrics_guide.get("lyrics") or {}, melody_guide)
     word_alignment = build_word_alignment_from_transcript(
         lyrics_guide.get("lyrics") or {},
@@ -549,6 +570,255 @@ def _write_coach_guide(
         handle.write("\n")
     os.replace(tmp_path, path)
     return path
+
+
+def _filter_melody_to_vocal_windows(
+    melody_guide: dict[str, Any],
+    lyrics: dict[str, Any] | None,
+    transcript: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Remove pitch guide material that is not supported by vocal timestamps."""
+    melody = dict(melody_guide or {})
+    existing_filter = melody.get("vocal_filter")
+    if (
+        isinstance(existing_filter, dict)
+        and existing_filter.get("applied")
+        and existing_filter.get("version") == VOCAL_FILTER_VERSION
+    ):
+        return melody
+
+    notes = melody.get("notes") if isinstance(melody.get("notes"), list) else []
+    contour = melody.get("contour") if isinstance(melody.get("contour"), list) else []
+    windows, source = _vocal_timing_windows(lyrics, transcript)
+    if not windows:
+        melody["vocal_filter"] = {
+            "applied": False,
+            "reason": "no_vocal_timing_windows",
+            "raw_notes": len(notes),
+            "raw_contour_points": len(contour),
+        }
+        return melody
+
+    filtered_notes = _filter_notes_to_windows(notes, windows)
+    filtered_contour = _filter_contour_to_windows(contour, windows, filtered_notes)
+    melody["notes"] = filtered_notes
+    melody["contour"] = filtered_contour
+    melody["vocal_filter"] = {
+        "applied": True,
+        "version": VOCAL_FILTER_VERSION,
+        "source": source,
+        "windows": len(windows),
+        "raw_notes": len(notes),
+        "kept_notes": len(filtered_notes),
+        "removed_notes": max(0, len(notes) - len(filtered_notes)),
+        "raw_contour_points": len(contour),
+        "kept_contour_points": len(filtered_contour),
+        "removed_contour_points": max(0, len(contour) - len(filtered_contour)),
+    }
+    return melody
+
+
+def _vocal_timing_windows(
+    lyrics: dict[str, Any] | None,
+    transcript: dict[str, Any] | None,
+) -> tuple[list[tuple[float, float]], str]:
+    transcript_windows = _transcript_word_windows(transcript)
+    lyric_windows = _karaoke_lyric_windows(lyrics)
+    line_windows = _line_lyric_windows(lyrics)
+
+    if transcript_windows and lyric_windows:
+        return _merge_time_windows(
+            transcript_windows + lyric_windows,
+            VOCAL_FILTER_MERGE_GAP_SECONDS,
+        ), "transcript_words+karaoke_lyrics"
+    if transcript_windows and line_windows:
+        return _merge_time_windows(
+            transcript_windows + line_windows,
+            VOCAL_FILTER_MERGE_GAP_SECONDS,
+        ), "transcript_words+line_lyrics"
+    if transcript_windows:
+        return transcript_windows, "transcript_words"
+
+    if lyric_windows:
+        return lyric_windows, "karaoke_lyrics"
+
+    if line_windows:
+        return line_windows, "line_lyrics"
+
+    return [], "none"
+
+
+def _transcript_word_windows(transcript: dict[str, Any] | None) -> list[tuple[float, float]]:
+    if not isinstance(transcript, dict):
+        return []
+    words = transcript.get("words") if isinstance(transcript.get("words"), list) else []
+    intervals = []
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        start = _safe_float(word.get("start"))
+        end = _safe_float(word.get("end"))
+        confidence = _safe_float(word.get("probability") or word.get("confidence"))
+        text = str(word.get("word") or word.get("text") or "").strip()
+        if not text or start is None or end is None or end <= start:
+            continue
+        if confidence is not None and confidence < VOCAL_FILTER_MIN_WORD_CONFIDENCE:
+            continue
+        intervals.append(
+            (
+                max(0.0, start - VOCAL_FILTER_LEAD_SECONDS),
+                end + VOCAL_FILTER_TAIL_SECONDS,
+            )
+        )
+    return _merge_time_windows(intervals, VOCAL_FILTER_MERGE_GAP_SECONDS)
+
+
+def _karaoke_lyric_windows(lyrics: dict[str, Any] | None) -> list[tuple[float, float]]:
+    if not isinstance(lyrics, dict) or not lyrics.get("has_karaoke_timing"):
+        return []
+    intervals = []
+    lines = lyrics.get("lines") if isinstance(lyrics.get("lines"), list) else []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        segments = line.get("segments") if isinstance(line.get("segments"), list) else []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            start = _safe_float(segment.get("start"))
+            end = _safe_float(segment.get("end"))
+            text = str(segment.get("text") or "").strip()
+            if text and start is not None and end is not None and end > start:
+                intervals.append((max(0.0, start - VOCAL_FILTER_LEAD_SECONDS), end + VOCAL_FILTER_TAIL_SECONDS))
+    return _merge_time_windows(intervals, VOCAL_FILTER_MERGE_GAP_SECONDS)
+
+
+def _line_lyric_windows(lyrics: dict[str, Any] | None) -> list[tuple[float, float]]:
+    if not isinstance(lyrics, dict) or lyrics.get("status") != "ready":
+        return []
+    lines = lyrics.get("lines") if isinstance(lyrics.get("lines"), list) else []
+    intervals = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        start = _safe_float(line.get("start"))
+        end = _safe_float(line.get("end"))
+        text = re.sub(r"\s+", " ", str(line.get("text") or "")).strip()
+        if not text or start is None or end is None or end <= start:
+            continue
+        estimated_end = _estimated_line_vocal_end(start, end, text)
+        intervals.append((max(0.0, start - VOCAL_FILTER_LEAD_SECONDS), estimated_end + VOCAL_FILTER_TAIL_SECONDS))
+    if len(intervals) < 2:
+        return []
+    return _merge_time_windows(intervals, VOCAL_FILTER_MERGE_GAP_SECONDS)
+
+
+def _estimated_line_vocal_end(start: float, end: float, text: str) -> float:
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", text, flags=re.UNICODE)
+    word_count = max(1, len(words))
+    reasonable_duration = max(
+        VOCAL_FILTER_LINE_MIN_SECONDS,
+        VOCAL_FILTER_LINE_BASE_SECONDS + word_count * VOCAL_FILTER_LINE_SECONDS_PER_WORD,
+    )
+    return min(end, start + reasonable_duration)
+
+
+def _filter_notes_to_windows(notes: list[Any], windows: list[tuple[float, float]]) -> list[dict[str, Any]]:
+    filtered = []
+    for note in notes:
+        if not isinstance(note, dict):
+            continue
+        start = _safe_float(note.get("start"))
+        end = _safe_float(note.get("end"))
+        if start is None or end is None or end <= start:
+            continue
+        for window_start, window_end in _overlapping_windows(start, end, windows):
+            clipped_start = max(start, window_start)
+            sustain_cap = window_end
+            if window_start <= start <= window_end:
+                sustain_cap = window_end + VOCAL_FILTER_MAX_SUSTAIN_EXTENSION_SECONDS
+            clipped_end = min(end, sustain_cap)
+            if clipped_end - clipped_start < VOCAL_FILTER_MIN_NOTE_SECONDS:
+                continue
+            clipped = dict(note)
+            clipped["start"] = round(clipped_start, 3)
+            clipped["end"] = round(clipped_end, 3)
+            filtered.append(clipped)
+    return filtered
+
+
+def _filter_contour_to_windows(
+    contour: list[Any],
+    windows: list[tuple[float, float]],
+    notes: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    filtered = []
+    note_windows = _note_windows(notes or [])
+    for point in contour:
+        if not isinstance(point, dict):
+            continue
+        time = _first_float(point.get("time"), point.get("t"), point.get("start"))
+        if time is None or not (_time_in_windows(time, windows) or _time_in_windows(time, note_windows)):
+            continue
+        filtered.append(dict(point))
+    return filtered
+
+
+def _note_windows(notes: list[dict[str, Any]]) -> list[tuple[float, float]]:
+    windows = []
+    for note in notes:
+        start = _safe_float(note.get("start"))
+        end = _safe_float(note.get("end"))
+        if start is not None and end is not None and end > start:
+            windows.append((start, end))
+    return windows
+
+
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        parsed = _safe_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _overlapping_windows(
+    start: float,
+    end: float,
+    windows: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    return [(window_start, window_end) for window_start, window_end in windows if window_end > start and window_start < end]
+
+
+def _time_in_windows(time: float, windows: list[tuple[float, float]]) -> bool:
+    return any(start <= time <= end for start, end in windows)
+
+
+def _merge_time_windows(
+    windows: list[tuple[float, float]],
+    max_gap_seconds: float,
+) -> list[tuple[float, float]]:
+    valid_windows = [(start, end) for start, end in windows if end > start]
+    if not valid_windows:
+        return []
+    valid_windows.sort()
+    merged: list[tuple[float, float]] = []
+    current_start, current_end = valid_windows[0]
+    for start, end in valid_windows[1:]:
+        if start - current_end <= max_gap_seconds:
+            current_end = max(current_end, end)
+            continue
+        merged.append((round(current_start, 3), round(current_end, 3)))
+        current_start, current_end = start, end
+    merged.append((round(current_start, 3), round(current_end, 3)))
+    return merged
 
 
 def _build_pitch_tasks(lyrics_guide: dict[str, Any], melody_guide: dict[str, Any]) -> list[dict]:

@@ -9,6 +9,9 @@
   const STAGE_ROAD_MAX_LOOKAHEAD_SECONDS = 24.0;
   const STAGE_ROAD_HIT_X = 0.22;
   const STAGE_ROAD_MIN_HEIGHT = 300;
+  const LYRIC_SILENCE_CUE_COUNT = 5;
+  const LYRIC_SILENCE_MIN_GAP_SECONDS = 0.25;
+  const LYRIC_PHRASE_MAX_SUSTAIN_EXTENSION_SECONDS = 5.0;
   const TRAIL_MIN_CONFIDENCE = 0.52;
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
@@ -2111,7 +2114,7 @@
   }
 
   function lyricWordTimelineSegments() {
-    if (!state.lyrics.length || !Array.isArray(state.lyricPaintUnits) || state.lyricPaintUnits.length === 0) return [];
+    if (!state.lyrics.length) return [];
 
     const offset = Number(state.lyricsOffsetSeconds || 0);
     const unitsByLine = new Map();
@@ -2211,12 +2214,14 @@
 
     const phrases = Array.from(groups.entries())
       .map(([lineIndex, words]) => {
-        const sortedWords = words.sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
+        const sortedWords = words.sort((a, b) => a.segmentIndex - b.segmentIndex || a.start - b.start);
+        const starts = sortedWords.map((word) => Number(word.start)).filter(Number.isFinite);
+        const ends = sortedWords.map((word) => Number(word.end)).filter(Number.isFinite);
         return {
           lineIndex,
           words: sortedWords,
-          start: sortedWords[0].start,
-          end: sortedWords[sortedWords.length - 1].end,
+          start: starts.length ? Math.min(...starts) : sortedWords[0].start,
+          end: ends.length ? Math.max(...ends) : sortedWords[sortedWords.length - 1].end,
           text: sortedWords.map((word) => word.text).join(" "),
         };
       })
@@ -2435,17 +2440,17 @@
   }
 
   function splitLyricCaptionWords(text) {
-    return String(text || "")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return [];
+    const tokens = cleanText.match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu);
+    return tokens?.length ? tokens : cleanText.split(/\s+/).filter(Boolean);
   }
 
   function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY, contour = [], notes = []) {
     if (!phrases.length) return false;
 
-    const laneHeight = 28;
-    const laneCount = 4;
+    const laneHeight = 40;
+    const laneCount = 3;
     const pitchRange = vocalMidiRange(contour, notes);
     const phraseLanes = cachedLyricPhraseLanes(contour, notes, pitchRange, laneCount);
     ctx.save();
@@ -2455,19 +2460,29 @@
     ctx.shadowBlur = 8;
     ctx.shadowOffsetY = 2;
 
+    const allPhrases = lyricPhrases();
+    const phraseTimings = lyricPhraseTimingMap(allPhrases, contour, notes);
+    drawLyricSilenceCues(ctx, width, allPhrases, phraseLanes, phraseTimings, xForTime, textY, laneHeight);
+
     phrases.forEach((phrase) => {
-      const isActive = songTime >= phrase.start && songTime <= phrase.end;
-      const isDone = songTime > phrase.end;
-      const fontSize = 22;
+      const timing = phraseTimings.get(phrase.lineIndex) || phrase;
+      const phraseStart = Number(timing.start);
+      const phraseEnd = Number(timing.end);
+      const isActive = songTime >= phraseStart && songTime <= phraseEnd;
+      const isDone = songTime > phraseEnd;
+      const fontSize = 23;
       ctx.font = `900 ${fontSize}px sans-serif`;
       const layouts = phraseWordLayouts(ctx, phrase.words, fontSize);
       const textWidth = layouts.totalWidth;
-      const timeX1 = xForTime(phrase.start);
-      const timeX2 = xForTime(phrase.end);
+      const timeX1 = xForTime(phraseStart);
+      const timeX2 = xForTime(phraseEnd);
       const timeCenter = (timeX1 + timeX2) / 2;
-      const visualWidth = Math.max(90, timeX2 - timeX1, textWidth + 28);
-      const visualX = timeCenter - visualWidth / 2;
-      if (visualX > width + 120 || visualX + visualWidth < -120) return;
+      const timingWidth = Math.max(4, timeX2 - timeX1);
+      const timingX = timeX1;
+      const textVisualWidth = Math.max(timingWidth, textWidth + 28);
+      const textVisualX = timeCenter - textVisualWidth / 2;
+      if (Math.max(timingX + timingWidth, textVisualX + textVisualWidth) < -120) return;
+      if (Math.min(timingX, textVisualX) > width + 120) return;
 
       const laneIndex = phraseLanes.get(phrase.lineIndex) ?? phrasePitchLane(phrase, contour, notes, pitchRange, laneCount);
       const y = textY + laneIndex * laneHeight;
@@ -2477,10 +2492,10 @@
         : isDone
           ? "rgba(18, 199, 156, 0.1)"
           : "rgba(246, 243, 234, 0.08)";
-      drawRoundRect(ctx, visualX, y - 17, visualWidth, 30, 8);
+      drawRoundRect(ctx, timingX, y - 17, timingWidth, 30, 8);
       ctx.fill();
 
-      const textX = visualX + (visualWidth - textWidth) / 2;
+      const textX = textVisualX + (textVisualWidth - textWidth) / 2;
       layouts.items.forEach((layout) => {
         const word = layout.word;
         const x = textX + layout.x;
@@ -2506,6 +2521,86 @@
     ctx.globalAlpha = 1;
     ctx.restore();
     return true;
+  }
+
+  function lyricPhraseTimingMap(phrases, contour, notes) {
+    const timings = new Map();
+    phrases.forEach((phrase) => {
+      timings.set(phrase.lineIndex, {
+        start: Number(phrase.start),
+        end: lyricPhraseVocalEnd(phrase, contour, notes),
+      });
+    });
+    return timings;
+  }
+
+  function lyricPhraseVocalEnd(phrase, contour, notes) {
+    const phraseStart = Number(phrase.start);
+    const phraseEnd = Number(phrase.end);
+    if (!Number.isFinite(phraseStart) || !Number.isFinite(phraseEnd)) return phrase.end;
+    let end = phraseEnd;
+    const maxEnd = phraseEnd + LYRIC_PHRASE_MAX_SUSTAIN_EXTENSION_SECONDS;
+
+    (notes || []).forEach((note) => {
+      const noteStart = Number(note.start);
+      const noteEnd = Number(note.end);
+      if (!Number.isFinite(noteStart) || !Number.isFinite(noteEnd) || noteEnd <= noteStart) return;
+      const startsAtPhraseTail = noteStart >= phraseStart - 0.2 && noteStart <= phraseEnd + 0.45;
+      const overlapsPhrase = noteEnd >= phraseStart && noteStart <= phraseEnd;
+      if ((startsAtPhraseTail || overlapsPhrase) && noteEnd > end) {
+        end = Math.min(noteEnd, maxEnd);
+      }
+    });
+
+    if (end > phraseEnd) return end;
+
+    const tailPoints = (contour || [])
+      .map((point) => Number(point.time))
+      .filter((time) => Number.isFinite(time) && time >= phraseEnd && time <= maxEnd)
+      .sort((a, b) => a - b);
+    let previous = phraseEnd;
+    tailPoints.forEach((time) => {
+      if (time - previous <= 0.55) {
+        end = time;
+        previous = time;
+      }
+    });
+    return end;
+  }
+
+  function drawLyricSilenceCues(ctx, width, phrases, phraseLanes, phraseTimings, xForTime, textY, laneHeight) {
+    const ordered = [...phrases].sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex);
+    ordered.forEach((phrase, index) => {
+      const next = ordered[index + 1];
+      if (!next) return;
+      const timing = phraseTimings.get(phrase.lineIndex) || phrase;
+      const nextTiming = phraseTimings.get(next.lineIndex) || next;
+      const gapStart = Number(timing.end);
+      const gapEnd = Number(nextTiming.start);
+      const gap = gapEnd - gapStart;
+      if (!Number.isFinite(gap) || gap < LYRIC_SILENCE_MIN_GAP_SECONDS) return;
+
+      const laneIndex = phraseLanes.get(next.lineIndex) ?? 0;
+      const y = textY + laneIndex * laneHeight;
+      const unit = gap / LYRIC_SILENCE_CUE_COUNT;
+      for (let cueIndex = 0; cueIndex < LYRIC_SILENCE_CUE_COUNT; cueIndex++) {
+        const cueStart = gapStart + unit * cueIndex;
+        const cueEnd = cueStart + unit;
+        const x1 = xForTime(cueStart);
+        const x2 = xForTime(cueEnd);
+        if (x2 < -20 || x1 > width + 20) continue;
+        const cueWidth = Math.max(3, x2 - x1);
+        const inset = Math.min(4, Math.max(1, cueWidth * 0.12));
+        const alpha = 0.07 + cueIndex * 0.025;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = `rgba(246, 243, 234, ${alpha})`;
+        ctx.strokeStyle = `rgba(246, 243, 234, ${alpha + 0.08})`;
+        ctx.lineWidth = 1;
+        drawRoundRect(ctx, x1 + inset, y - 17, Math.max(2, cueWidth - inset * 2), 30, 8);
+        ctx.fill();
+        ctx.stroke();
+      }
+    });
   }
 
   function cachedLyricPhraseLanes(contour, notes, pitchRange, laneCount) {
@@ -2550,8 +2645,11 @@
       (lane) => lane !== blockedLane && start >= laneAvailableAt[lane] - laneGapSeconds * 0.2,
     );
     if (Number.isFinite(openLane)) return openLane;
-    const unblockedLane = candidates.find((lane) => lane !== blockedLane);
-    return Number.isFinite(unblockedLane) ? unblockedLane : preferredLane;
+    const fallbackLanes = candidates.filter((lane) => lane !== blockedLane);
+    if (fallbackLanes.length) {
+      return fallbackLanes.sort((a, b) => laneAvailableAt[a] - laneAvailableAt[b] || a - b)[0];
+    }
+    return preferredLane;
   }
 
   function lyricLaneCandidates(preferredLane, laneCount) {
@@ -2631,7 +2729,7 @@
 
     ctx.save();
     ctx.fillStyle = "rgba(3, 6, 10, 0.46)";
-    drawRoundRect(ctx, 0, railTop - 16, width, fixedLyrics ? 44 : hasWordSegments ? 154 : 78, 0);
+    drawRoundRect(ctx, 0, railTop - 16, width, fixedLyrics ? 44 : hasWordSegments ? 168 : 78, 0);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(246, 243, 234, 0.14)";

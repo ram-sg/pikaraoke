@@ -171,8 +171,216 @@ def test_pending_analysis_writes_coach_guide_and_marks_ready(tmp_path):
     assert coach_guide["transcript"]["engine"] == "faster-whisper"
     assert coach_guide["lyrics"]["alignment"]["granularity"] == "word"
     assert coach_guide["lyrics"]["alignment"]["paint_units"][0]["start"] == 0.12
+    assert coach_guide["melody"]["vocal_filter"]["applied"] is True
     assert coach_guide["tasks"][0]["target_midi"] == 60
     assert coach_guide["tasks"][0]["text"] == "hello"
+    db.close()
+
+
+def test_pending_analysis_filters_pitch_notes_outside_vocal_windows(tmp_path):
+    media_path = tmp_path / "Artist - Song---abc12345678.mp4"
+    media_path.write_bytes(b"fake media")
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    result = manager.register_local_file(str(media_path))
+    lyrics_guide = {
+        "lyrics": {
+            "status": "ready",
+            "has_karaoke_timing": True,
+            "lines": [
+                {"start": 0.0, "end": 2.0, "text": "hello"},
+                {"start": 8.0, "end": 10.0, "text": "again"},
+            ],
+        }
+    }
+    melody_guide = {
+        "status": "ready",
+        "duration_seconds": 12,
+        "notes": [
+            {"start": 0.2, "end": 1.0, "midi": 60, "note": "C4", "frequency": 261.63, "confidence": 0.9},
+            {"start": 4.0, "end": 5.0, "midi": 65, "note": "F4", "frequency": 349.23, "confidence": 0.92},
+            {"start": 8.2, "end": 9.0, "midi": 62, "note": "D4", "frequency": 293.66, "confidence": 0.88},
+        ],
+        "contour": [
+            {"time": 0.3, "midi": 60, "confidence": 0.9},
+            {"time": 4.4, "midi": 65, "confidence": 0.92},
+            {"time": 8.4, "midi": 62, "confidence": 0.88},
+        ],
+    }
+    stems = {
+        "status": "ready",
+        "engine": "demucs",
+        "vocals_path": str(tmp_path / "vocals.wav"),
+        "instrumental_path": str(tmp_path / "instrumental.wav"),
+    }
+
+    with (
+        patch("biaoke.lib.coach_preparation.write_song_guide", return_value=lyrics_guide),
+        patch("biaoke.lib.coach_preparation._separate_coach_stems", return_value=stems),
+        patch("biaoke.lib.coach_preparation._extract_coach_melody", return_value=melody_guide),
+        patch(
+            "biaoke.lib.coach_preparation._transcribe_coach_vocals",
+            return_value={
+                "status": "ready",
+                "engine": "faster-whisper",
+                "words": [
+                    {"word": "hello", "start": 0.15, "end": 0.7, "probability": 0.94},
+                    {"word": "again", "start": 8.15, "end": 8.75, "probability": 0.93},
+                ],
+            },
+        ),
+    ):
+        assert manager.run_pending_analysis_once() is True
+
+    assets = db.get_coach_assets(result["track"]["id"])
+    with open(assets["guide_path"], encoding="utf-8") as handle:
+        coach_guide = json.load(handle)
+
+    assert [note["midi"] for note in coach_guide["melody"]["notes"]] == [60, 62]
+    assert [point["midi"] for point in coach_guide["melody"]["contour"]] == [60, 62]
+    assert [task["target_midi"] for task in coach_guide["tasks"]] == [60, 62]
+    assert coach_guide["melody"]["vocal_filter"]["removed_notes"] == 1
+    assert coach_guide["melody"]["vocal_filter"]["removed_contour_points"] == 1
+    db.close()
+
+
+def test_pending_analysis_preserves_sustained_note_tail_after_last_word(tmp_path):
+    media_path = tmp_path / "Artist - Ballad---abc12345678.mp4"
+    media_path.write_bytes(b"fake media")
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    result = manager.register_local_file(str(media_path))
+    lyrics_guide = {
+        "lyrics": {
+            "status": "ready",
+            "has_karaoke_timing": True,
+            "lines": [{"start": 10.0, "end": 20.0, "text": "life on Mars"}],
+        }
+    }
+    melody_guide = {
+        "status": "ready",
+        "duration_seconds": 24,
+        "notes": [
+            {"start": 14.9, "end": 18.75, "midi": 69, "note": "A4", "frequency": 440.0, "confidence": 0.88},
+            {"start": 20.0, "end": 20.35, "midi": 57, "note": "A3", "frequency": 220.0, "confidence": 0.91},
+        ],
+        "contour": [
+            {"time": 15.0, "midi": 69, "confidence": 0.9},
+            {"time": 17.5, "midi": 69, "confidence": 0.86},
+            {"time": 20.1, "midi": 57, "confidence": 0.91},
+        ],
+    }
+    stems = {
+        "status": "ready",
+        "engine": "demucs",
+        "vocals_path": str(tmp_path / "vocals.wav"),
+        "instrumental_path": str(tmp_path / "instrumental.wav"),
+    }
+
+    with (
+        patch("biaoke.lib.coach_preparation.write_song_guide", return_value=lyrics_guide),
+        patch("biaoke.lib.coach_preparation._separate_coach_stems", return_value=stems),
+        patch("biaoke.lib.coach_preparation._extract_coach_melody", return_value=melody_guide),
+        patch(
+            "biaoke.lib.coach_preparation._transcribe_coach_vocals",
+            return_value={
+                "status": "ready",
+                "engine": "faster-whisper",
+                "words": [{"word": "Mars", "start": 14.79, "end": 15.19, "probability": 0.91}],
+            },
+        ),
+    ):
+        assert manager.run_pending_analysis_once() is True
+
+    assets = db.get_coach_assets(result["track"]["id"])
+    with open(assets["guide_path"], encoding="utf-8") as handle:
+        coach_guide = json.load(handle)
+
+    assert coach_guide["melody"]["notes"] == [melody_guide["notes"][0]]
+    assert [point["time"] for point in coach_guide["melody"]["contour"]] == [15.0, 17.5]
+    assert coach_guide["melody"]["vocal_filter"]["removed_notes"] == 1
+    db.close()
+
+
+def test_pending_analysis_uses_line_lyrics_when_transcript_misses_repeated_chants(tmp_path):
+    media_path = tmp_path / "Artist - Repeated---abc12345678.mp4"
+    media_path.write_bytes(b"fake media")
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    result = manager.register_local_file(str(media_path))
+    lyrics_guide = {
+        "lyrics": {
+            "status": "ready",
+            "has_karaoke_timing": False,
+            "lines": [
+                {"start": 40.0, "end": 44.0, "text": "Fa-fa-fa-fa, fa-fa-fa-fa-fa-fa, better"},
+                {"start": 44.0, "end": 52.0, "text": "Run, run, run, run, run away"},
+                {"start": 90.0, "end": 94.0, "text": "Fa-fa-fa-fa, fa-fa-fa-fa-fa-fa, better"},
+                {"start": 94.0, "end": 102.0, "text": "Run, run, run, run, run away"},
+            ],
+        }
+    }
+    melody_guide = {
+        "status": "ready",
+        "duration_seconds": 110,
+        "notes": [
+            {"start": 42.0, "end": 43.0, "midi": 59, "note": "B3", "frequency": 246.94, "confidence": 0.9},
+            {"start": 46.0, "end": 47.0, "midi": 60, "note": "C4", "frequency": 261.63, "confidence": 0.88},
+            {"start": 70.0, "end": 71.0, "midi": 65, "note": "F4", "frequency": 349.23, "confidence": 0.92},
+            {"start": 96.0, "end": 97.0, "midi": 60, "note": "C4", "frequency": 261.63, "confidence": 0.87},
+        ],
+        "contour": [
+            {"time": 42.5, "midi": 59, "confidence": 0.9},
+            {"time": 46.5, "midi": 60, "confidence": 0.88},
+            {"time": 70.5, "midi": 65, "confidence": 0.92},
+            {"time": 96.5, "midi": 60, "confidence": 0.87},
+        ],
+    }
+    stems = {
+        "status": "ready",
+        "engine": "demucs",
+        "vocals_path": str(tmp_path / "vocals.wav"),
+        "instrumental_path": str(tmp_path / "instrumental.wav"),
+    }
+
+    with (
+        patch("biaoke.lib.coach_preparation.write_song_guide", return_value=lyrics_guide),
+        patch("biaoke.lib.coach_preparation._separate_coach_stems", return_value=stems),
+        patch("biaoke.lib.coach_preparation._extract_coach_melody", return_value=melody_guide),
+        patch(
+            "biaoke.lib.coach_preparation._transcribe_coach_vocals",
+            return_value={
+                "status": "ready",
+                "engine": "faster-whisper",
+                "words": [{"word": "run", "start": 96.2, "end": 96.8, "probability": 0.92}],
+            },
+        ),
+    ):
+        assert manager.run_pending_analysis_once() is True
+
+    assets = db.get_coach_assets(result["track"]["id"])
+    with open(assets["guide_path"], encoding="utf-8") as handle:
+        coach_guide = json.load(handle)
+
+    assert [note["start"] for note in coach_guide["melody"]["notes"]] == [42.0, 46.0, 96.0]
+    assert [point["time"] for point in coach_guide["melody"]["contour"]] == [42.5, 46.5, 96.5]
+    assert coach_guide["melody"]["vocal_filter"]["source"] == "transcript_words+line_lyrics"
+    assert coach_guide["melody"]["vocal_filter"]["removed_notes"] == 1
     db.close()
 
 
@@ -286,7 +494,10 @@ def test_pending_analysis_accepts_line_timed_lyrics(tmp_path):
                 "lyrics": {
                     "status": "ready",
                     "has_karaoke_timing": False,
-                    "lines": [{"start": 0, "end": 1, "text": "hello"}],
+                    "lines": [
+                        {"start": 0, "end": 1, "text": "hello"},
+                        {"start": 2, "end": 3, "text": "again"},
+                    ],
                 }
             },
         ),
@@ -313,6 +524,7 @@ def test_pending_analysis_accepts_line_timed_lyrics(tmp_path):
     assert track["status"] == "ready"
     assert track["quality_status"] == "ready"
     assert "line_timing_only" in coach_guide["quality"]["messages"]
+    assert coach_guide["melody"]["vocal_filter"]["source"] == "line_lyrics"
     db.close()
 
 
