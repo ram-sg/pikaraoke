@@ -305,6 +305,34 @@ def test_current_vocal_reference_streams_original_for_playing_coach_stem(tmp_pat
     assert response.mimetype == "audio/mpeg"
 
 
+def test_current_vocal_reference_prefers_vocal_stem(tmp_path):
+    app = Flask(__name__)
+    app.register_blueprint(score_bp)
+    original_path = tmp_path / "song.mp3"
+    vocal_path = tmp_path / "song.vocals.wav"
+    instrumental_path = tmp_path / "song.instrumental.wav"
+    original_path.write_bytes(b"fake original audio")
+    vocal_path.write_bytes(b"fake vocal stem")
+    instrumental_path.write_bytes(b"fake instrumental")
+
+    mock_karaoke = MagicMock()
+    controller = mock_karaoke.playback_controller
+    controller.now_playing_filename = str(instrumental_path)
+    mock_karaoke.coach_preparation.load_coach_guide_for_media_path.return_value = {
+        "assets": {
+            "original_audio_path": str(original_path),
+            "vocal_reference_path": str(vocal_path),
+        },
+    }
+    app.config["KARAOKE_INSTANCE"] = mock_karaoke
+
+    response = app.test_client().get("/score/vocal-reference/current")
+
+    assert response.status_code == 200
+    assert response.data == b"fake vocal stem"
+    assert response.mimetype == "audio/x-wav"
+
+
 def test_current_vocal_reference_returns_missing_without_coach_package(tmp_path):
     app = Flask(__name__)
     app.register_blueprint(score_bp)

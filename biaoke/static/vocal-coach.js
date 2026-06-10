@@ -12,7 +12,7 @@
   const TRAIL_MIN_CONFIDENCE = 0.52;
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
-  const CONTOUR_TARGET_MAX_GAP_SECONDS = 0.34;
+  const CONTOUR_TARGET_MAX_GAP_SECONDS = 0.55;
   const TARGET_BRIDGE_MAX_GAP_SECONDS = 0.9;
   const TARGET_BRIDGE_MAX_SEMITONES = 2.25;
   const VISUAL_PITCH_HOLD_MS = 420;
@@ -36,7 +36,8 @@
   const LYRICS_OFFSET_STEP_SECONDS = 0.5;
   const MAX_LYRICS_OFFSET_SECONDS = 120;
   const VOCAL_REFERENCE_VOLUME = 0.48;
-  const VOCAL_REFERENCE_SYNC_DRIFT_SECONDS = 0.18;
+  const VOCAL_REFERENCE_SYNC_DRIFT_SECONDS = 0.75;
+  const VOCAL_REFERENCE_SYNC_INTERVAL_MS = 850;
   const CONFIG = window.BiaokeCoachConfig || {};
 
   const TEXT = {
@@ -151,6 +152,7 @@
     vocalReferenceEnabled: false,
     vocalReferenceAvailable: false,
     vocalReferenceKey: null,
+    vocalReferenceLastSyncAt: 0,
   };
 
   const els = {};
@@ -383,6 +385,7 @@
     reference.removeAttribute("src");
     reference.load();
     state.vocalReferenceKey = null;
+    state.vocalReferenceLastSyncAt = 0;
   }
 
   function setVocalReferenceVolume() {
@@ -412,6 +415,10 @@
     const reference = getVocalReferencePlayer();
     const video = getVideoPlayer();
     if (!reference || !video || !reference.src) return;
+    const now = performance.now();
+    if (!force && now - state.vocalReferenceLastSyncAt < VOCAL_REFERENCE_SYNC_INTERVAL_MS) return;
+    state.vocalReferenceLastSyncAt = now;
+
     const position = Number(video.currentTime || 0);
     if (!Number.isFinite(position)) return;
 
@@ -494,6 +501,35 @@
       }
     }
     return closest;
+  }
+
+  function lyricLineForSongTime(songTime, graceSeconds = 0) {
+    if (!Array.isArray(state.lyrics) || state.lyrics.length === 0) return null;
+    const lyricTime = Number(songTime) - Number(state.lyricsOffsetSeconds || 0);
+    if (!Number.isFinite(lyricTime)) return null;
+    for (let index = 0; index < state.lyrics.length; index++) {
+      const line = state.lyrics[index];
+      const start = Number(line.start);
+      const end = Number(line.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      if (lyricTime >= start - graceSeconds && lyricTime <= end + graceSeconds) {
+        return {
+          line,
+          index,
+          start: start + Number(state.lyricsOffsetSeconds || 0),
+          end: end + Number(state.lyricsOffsetSeconds || 0),
+        };
+      }
+    }
+    return null;
+  }
+
+  function shouldGateTargetsByLyrics() {
+    return selectedMode() === "song" && Array.isArray(state.lyrics) && state.lyrics.length > 0;
+  }
+
+  function isInsideLyricTargetWindow(songTime, graceSeconds = 0.15) {
+    return !shouldGateTargetsByLyrics() || Boolean(lyricLineForSongTime(songTime, graceSeconds));
   }
 
   function bridgedSongNoteAtTime(songTime, notes = songGuideNotes()) {
@@ -607,21 +643,29 @@
   }
 
   function referenceTargetAtSongTime(songTime, notes = songGuideNotes(), contour = songGuideContour()) {
-    const noteMatch = songNoteAtTime(songTime, notes, 0.35) || bridgedSongNoteAtTime(songTime, notes);
-    if (!noteMatch) return null;
+    const lyricMatch = lyricLineForSongTime(songTime, 0.12);
+    if (shouldGateTargetsByLyrics() && !lyricMatch) return null;
 
-    const note = noteMatch.note;
-    const duration = Math.max(0.05, Number(note.end) - Number(note.start));
+    const noteMatch = songNoteAtTime(songTime, notes, 0.35) || bridgedSongNoteAtTime(songTime, notes);
     const contourPoint = contourPointAtSongTime(songTime, contour);
+    if (!noteMatch && !contourPoint) return null;
+
+    const note = noteMatch?.note || {
+      start: lyricMatch ? lyricMatch.start : songTime,
+      end: lyricMatch ? lyricMatch.end : songTime + 0.25,
+      midi: contourPoint ? Math.round(contourPoint.midi) : 60,
+      confidence: contourPoint ? contourPoint.confidence : 0.45,
+    };
+    const duration = Math.max(0.05, Number(note.end) - Number(note.start));
     const midi = contourPoint ? contourPoint.midi : Number.isFinite(noteMatch.midi) ? noteMatch.midi : Number(note.midi);
     return {
       midi,
       noteMidi: Number(note.midi),
-      index: noteMatch.index,
+      index: noteMatch ? noteMatch.index : `lyric-${lyricMatch?.index ?? Math.floor(songTime)}`,
       cycle: "song",
       duration,
       progress: clamp((songTime - Number(note.start)) / duration, 0, 1),
-      source: contourPoint ? "song-contour" : noteMatch.bridged ? "song-bridge" : "song",
+      source: contourPoint ? "song-contour" : noteMatch?.bridged ? "song-bridge" : "song",
       songTime,
       confidence: contourPoint ? contourPoint.confidence : Number(note.confidence ?? 0.6),
     };
@@ -1845,7 +1889,7 @@
     const contour = songGuideContour();
     const minTime = songTime - 4;
     const maxTime = songTime + songRoadLookaheadSeconds(songTime, notes);
-    const visibleNotes = notes.filter((note) => Number(note.end) >= minTime && Number(note.start) <= maxTime);
+    const visibleNotes = visibleRoadNotes(notes, minTime, maxTime);
     const midiValues = [];
     visibleNotes.forEach((note) => {
       const midi = Number(note.midi);
@@ -1968,7 +2012,15 @@
       const start = Number(note.start);
       const end = Number(note.end);
       const midi = Number(note.midi);
-      return Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(midi) && end >= minTime && start <= maxTime;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(midi)) return false;
+      if (end < minTime || start > maxTime) return false;
+      if (!shouldGateTargetsByLyrics()) return true;
+      const midpoint = start + (end - start) / 2;
+      return (
+        isInsideLyricTargetWindow(midpoint, 0.25) ||
+        isInsideLyricTargetWindow(start, 0.15) ||
+        isInsideLyricTargetWindow(end, 0.15)
+      );
     });
   }
 
@@ -1982,7 +2034,8 @@
         Number.isFinite(midi) &&
         confidence >= REFERENCE_CONTOUR_MIN_CONFIDENCE &&
         time >= minTime &&
-        time <= maxTime
+        time <= maxTime &&
+        isInsideLyricTargetWindow(time, 0.15)
       );
     });
   }
@@ -2131,6 +2184,52 @@
     ctx.restore();
   }
 
+  function drawTargetContourTiles(ctx, visibleContour, xForTime, yForMidi, layout, songTime) {
+    if (!Array.isArray(visibleContour) || visibleContour.length === 0) return;
+    ctx.save();
+    ctx.lineWidth = 1;
+
+    visibleContour.forEach((point, index) => {
+      const next = visibleContour[index + 1] || null;
+      const start = Number(point.time);
+      const midi = Number(point.midi);
+      const confidence = clamp(Number(point.confidence ?? 0.6), 0.25, 1);
+      if (!Number.isFinite(start) || !Number.isFinite(midi)) return;
+
+      const nextTime = Number(next?.time);
+      const gap = Number.isFinite(nextTime) ? nextTime - start : 0;
+      const end = gap > 0 && gap <= CONTOUR_TARGET_MAX_GAP_SECONDS ? nextTime : start + 0.14;
+      const x1 = Math.max(-48, xForTime(start));
+      const x2 = Math.min(layout.width + 48, xForTime(end));
+      const width = Math.max(6, x2 - x1);
+      const y = clampRoadY(yForMidi(midi), layout);
+      const height = clamp(layout.roadHeight * 0.028, 9, 16);
+      const isCurrent = songTime >= start && songTime <= end;
+      const isDone = songTime > end;
+
+      ctx.globalAlpha = isCurrent ? 1 : isDone ? 0.44 : 0.54 + confidence * 0.28;
+      ctx.fillStyle = isCurrent
+        ? "rgba(246, 243, 234, 0.96)"
+        : isDone
+          ? "rgba(18, 199, 156, 0.56)"
+          : "rgba(155, 230, 214, 0.78)";
+      drawRoundRect(ctx, x1, y - height / 2, width, height, Math.min(7, height / 2));
+      ctx.fill();
+
+      if (isCurrent) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "rgba(18, 199, 156, 0.94)";
+        ctx.lineWidth = 2;
+        drawRoundRect(ctx, x1, y - height / 2, width, height, Math.min(7, height / 2));
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+    });
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   function drawReferenceVocalContour(ctx, contour, notes, xForTime, yForMidi, layout) {
     const points = contour
       .map((point) => graphReferencePoint(point, notes, contour))
@@ -2248,7 +2347,7 @@
     ctx.fillStyle = backdrop;
     ctx.fillRect(0, 0, width, height);
 
-    if (selectedMode() !== "song" || notes.length === 0) {
+    if (selectedMode() !== "song" || (notes.length === 0 && contour.length === 0)) {
       drawRoadMessage(ctx, width, height, state.songGuideLoading ? TEXT.loadingGuide : TEXT.noGuide);
       ctx.restore();
       return;
@@ -2281,7 +2380,12 @@
     }
 
     const visibleNotes = visibleRoadNotes(notes, minTime, maxTime);
-    drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime);
+    const visibleContour = visibleRoadContour(contour, minTime, maxTime);
+    if (visibleContour.length > 0) {
+      drawTargetContourTiles(ctx, visibleContour, xForTime, yForMidi, layout, songTime);
+    } else {
+      drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime);
+    }
 
     ctx.strokeStyle = "rgba(246, 243, 234, 0.84)";
     ctx.lineWidth = 2;

@@ -217,9 +217,9 @@ def current_vocal_reference():
     if not coach_guide:
         return jsonify({"status": "missing", "message": "Faixa original do coach não encontrada."}), 404
 
-    source_path = _coach_source_media_path(coach_guide)
+    source_path = _coach_vocal_reference_path(coach_guide)
     if not source_path or not source_path.is_file():
-        return jsonify({"status": "missing", "message": "Arquivo original do coach não encontrado."}), 404
+        return jsonify({"status": "missing", "message": "Voz original do coach não encontrada."}), 404
 
     mimetype = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
     return send_file(
@@ -464,8 +464,27 @@ def _coach_source_media_path(coach_guide: dict) -> Path | None:
     return path if path.is_file() else None
 
 
+def _coach_vocal_reference_path(coach_guide: dict) -> Path | None:
+    assets = coach_guide.get("assets") or {}
+    stems = coach_guide.get("stems") or {}
+    media = coach_guide.get("media") or {}
+    candidates = [
+        assets.get("vocal_reference_path"),
+        stems.get("vocals_path"),
+        assets.get("original_audio_path"),
+        media.get("path"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(str(candidate))
+        if path.is_file():
+            return path
+    return None
+
+
 def _coach_vocal_reference_available(coach_guide: dict) -> bool:
-    return _coach_source_media_path(coach_guide) is not None
+    return _coach_vocal_reference_path(coach_guide) is not None
 
 
 def _coach_lyrics_offset(coach_guide: dict) -> float:
