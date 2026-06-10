@@ -11,7 +11,6 @@
   const STAGE_ROAD_MIN_HEIGHT = 300;
   const LYRIC_SILENCE_CUE_COUNT = 5;
   const LYRIC_SILENCE_MIN_GAP_SECONDS = 0.25;
-  const LYRIC_PHRASE_MAX_SUSTAIN_EXTENSION_SECONDS = 5.0;
   const TRAIL_MIN_CONFIDENCE = 0.52;
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
@@ -42,6 +41,9 @@
   const VOCAL_REFERENCE_SYNC_DRIFT_SECONDS = 0.75;
   const VOCAL_REFERENCE_SYNC_INTERVAL_MS = 850;
   const FIXED_LYRICS_STORAGE_KEY = "biaoke-coach-fixed-lyrics";
+  const LYRIC_ROAD_LANE_COUNT = 3;
+  const LYRIC_ROAD_LANE_HEIGHT = 42;
+  const LYRIC_ROAD_LANE_GAP_SECONDS = 0.18;
   const CONFIG = window.BiaokeCoachConfig || {};
 
   const TEXT = {
@@ -2474,13 +2476,12 @@
     return tokens?.length ? tokens : cleanText.split(/\s+/).filter(Boolean);
   }
 
-  function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY, contour = [], notes = []) {
+  function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY) {
     if (!phrases.length) return false;
 
-    const laneHeight = 40;
-    const laneCount = 3;
-    const pitchRange = vocalMidiRange(contour, notes);
-    const phraseLanes = cachedLyricPhraseLanes(contour, notes, pitchRange, laneCount);
+    const laneHeight = LYRIC_ROAD_LANE_HEIGHT;
+    const laneCount = LYRIC_ROAD_LANE_COUNT;
+    const phraseLanes = cachedLyricPhraseLanes(laneCount);
     ctx.save();
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -2489,7 +2490,7 @@
     ctx.shadowOffsetY = 2;
 
     const allPhrases = lyricPhrases();
-    const phraseTimings = lyricPhraseTimingMap(allPhrases, contour, notes);
+    const phraseTimings = lyricPhraseTimingMap(allPhrases);
     drawLyricSilenceCues(ctx, width, allPhrases, phraseLanes, phraseTimings, xForTime, textY, laneHeight);
 
     phrases.forEach((phrase) => {
@@ -2508,7 +2509,7 @@
       if (Math.max(timingX + timingWidth, layouts.maxX) < -120) return;
       if (Math.min(timingX, layouts.minX) > width + 120) return;
 
-      const laneIndex = phraseLanes.get(phrase.lineIndex) ?? phrasePitchLane(phrase, contour, notes, pitchRange, laneCount);
+      const laneIndex = phraseLanes.get(phrase.lineIndex) ?? stableLyricLane(phrase.lineIndex, laneCount);
       const y = textY + laneIndex * laneHeight;
       ctx.globalAlpha = phrase.words.every((word) => word.estimated) ? 0.72 : 1;
       ctx.fillStyle = isActive
@@ -2546,49 +2547,15 @@
     return true;
   }
 
-  function lyricPhraseTimingMap(phrases, contour, notes) {
+  function lyricPhraseTimingMap(phrases) {
     const timings = new Map();
     phrases.forEach((phrase) => {
       timings.set(phrase.lineIndex, {
         start: Number(phrase.start),
-        end: lyricPhraseVocalEnd(phrase, contour, notes),
+        end: Number(phrase.end),
       });
     });
     return timings;
-  }
-
-  function lyricPhraseVocalEnd(phrase, contour, notes) {
-    const phraseStart = Number(phrase.start);
-    const phraseEnd = Number(phrase.end);
-    if (!Number.isFinite(phraseStart) || !Number.isFinite(phraseEnd)) return phrase.end;
-    let end = phraseEnd;
-    const maxEnd = phraseEnd + LYRIC_PHRASE_MAX_SUSTAIN_EXTENSION_SECONDS;
-
-    (notes || []).forEach((note) => {
-      const noteStart = Number(note.start);
-      const noteEnd = Number(note.end);
-      if (!Number.isFinite(noteStart) || !Number.isFinite(noteEnd) || noteEnd <= noteStart) return;
-      const startsAtPhraseTail = noteStart >= phraseStart - 0.2 && noteStart <= phraseEnd + 0.45;
-      const overlapsPhrase = noteEnd >= phraseStart && noteStart <= phraseEnd;
-      if ((startsAtPhraseTail || overlapsPhrase) && noteEnd > end) {
-        end = Math.min(noteEnd, maxEnd);
-      }
-    });
-
-    if (end > phraseEnd) return end;
-
-    const tailPoints = (contour || [])
-      .map((point) => Number(point.time))
-      .filter((time) => Number.isFinite(time) && time >= phraseEnd && time <= maxEnd)
-      .sort((a, b) => a - b);
-    let previous = phraseEnd;
-    tailPoints.forEach((time) => {
-      if (time - previous <= 0.55) {
-        end = time;
-        previous = time;
-      }
-    });
-    return end;
   }
 
   function drawLyricSilenceCues(ctx, width, phrases, phraseLanes, phraseTimings, xForTime, textY, laneHeight) {
@@ -2626,53 +2593,38 @@
     });
   }
 
-  function cachedLyricPhraseLanes(contour, notes, pitchRange, laneCount) {
+  function cachedLyricPhraseLanes(laneCount) {
     const cacheKey = [
       lyricContentCacheKey(),
-      contour.length,
-      notes.length,
       laneCount,
-      Math.round(pitchRange.minMidi * 10),
-      Math.round(pitchRange.maxMidi * 10),
     ].join("|");
     if (state.lyricLaneCacheKey === cacheKey && state.lyricLaneCache) return state.lyricLaneCache;
-    const lanes = assignLyricPhraseLanes(lyricPhrases(), contour, notes, pitchRange, laneCount);
+    const lanes = assignLyricPhraseLanes(lyricPhrases(), laneCount);
     state.lyricLaneCacheKey = cacheKey;
     state.lyricLaneCache = lanes;
     return lanes;
   }
 
-  function assignLyricPhraseLanes(phrases, contour, notes, pitchRange, laneCount) {
+  function assignLyricPhraseLanes(phrases, laneCount) {
     const assignments = new Map();
-    let previous = null;
     const laneAvailableAt = Array.from({ length: laneCount }, () => -Infinity);
-    const laneGapSeconds = 1.15;
     [...phrases]
       .sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex)
-      .forEach((phrase) => {
-        const preferredLane = phrasePitchLane(phrase, contour, notes, pitchRange, laneCount);
-        const blockedLane =
-          previous && Number(phrase.lineIndex) === Number(previous.lineIndex) + 1 ? previous.lane : null;
-        const lane = chooseStableLyricLane(preferredLane, blockedLane, phrase, laneAvailableAt, laneGapSeconds);
+      .forEach((phrase, order) => {
+        const preferredLane = stableLyricLane(Number.isFinite(Number(phrase.lineIndex)) ? phrase.lineIndex : order, laneCount);
+        const lane = chooseStableLyricLane(preferredLane, phrase, laneAvailableAt, LYRIC_ROAD_LANE_GAP_SECONDS);
         assignments.set(phrase.lineIndex, lane);
-        laneAvailableAt[lane] = Math.max(laneAvailableAt[lane], Number(phrase.end) + laneGapSeconds);
-        previous = { lineIndex: Number(phrase.lineIndex), lane };
+        laneAvailableAt[lane] = Math.max(laneAvailableAt[lane], Number(phrase.end) + LYRIC_ROAD_LANE_GAP_SECONDS);
       });
     return assignments;
   }
 
-  function chooseStableLyricLane(preferredLane, blockedLane, phrase, laneAvailableAt, laneGapSeconds) {
+  function chooseStableLyricLane(preferredLane, phrase, laneAvailableAt, laneGapSeconds) {
     const candidates = lyricLaneCandidates(preferredLane, laneAvailableAt.length);
     const start = Number(phrase.start);
-    const openLane = candidates.find(
-      (lane) => lane !== blockedLane && start >= laneAvailableAt[lane] - laneGapSeconds * 0.2,
-    );
+    const openLane = candidates.find((lane) => start >= laneAvailableAt[lane] - laneGapSeconds * 0.2);
     if (Number.isFinite(openLane)) return openLane;
-    const fallbackLanes = candidates.filter((lane) => lane !== blockedLane);
-    if (fallbackLanes.length) {
-      return fallbackLanes.sort((a, b) => laneAvailableAt[a] - laneAvailableAt[b] || a - b)[0];
-    }
-    return preferredLane;
+    return candidates.sort((a, b) => laneAvailableAt[a] - laneAvailableAt[b] || a - b)[0] ?? preferredLane;
   }
 
   function lyricLaneCandidates(preferredLane, laneCount) {
@@ -2681,46 +2633,9 @@
     );
   }
 
-  function vocalMidiRange(contour, notes) {
-    const values = [];
-    (contour || []).forEach((point) => {
-      const midi = Number(point.midi);
-      const confidence = Number(point.confidence ?? 1);
-      if (Number.isFinite(midi) && confidence >= REFERENCE_CONTOUR_MIN_CONFIDENCE) values.push(midi);
-    });
-    (notes || []).forEach((note) => {
-      const midi = Number(note.midi);
-      if (Number.isFinite(midi)) values.push(midi);
-    });
-    if (!values.length) return { minMidi: 48, maxMidi: 72 };
-    let minMidi = Math.floor(Math.min(...values)) - 1;
-    let maxMidi = Math.ceil(Math.max(...values)) + 1;
-    const span = maxMidi - minMidi;
-    if (span < 10) {
-      const pad = (10 - span) / 2;
-      minMidi -= pad;
-      maxMidi += pad;
-    }
-    return { minMidi, maxMidi };
-  }
-
-  function phrasePitchLane(phrase, contour, notes, pitchRange, laneCount) {
-    const midi = phraseMidi(phrase, contour, notes);
-    if (!Number.isFinite(midi)) return Math.abs(Number(phrase.lineIndex) || 0) % laneCount;
-    const span = Math.max(1, pitchRange.maxMidi - pitchRange.minMidi);
-    const normalized = clamp((midi - pitchRange.minMidi) / span, 0, 0.999);
-    return laneCount - 1 - Math.floor(normalized * laneCount);
-  }
-
-  function phraseMidi(phrase, contour, notes) {
-    const values = [];
-    (phrase.words || []).forEach((word) => {
-      const midi = lyricWordMidi(word, contour, notes);
-      if (Number.isFinite(midi)) values.push(midi);
-    });
-    if (!values.length) return null;
-    values.sort((a, b) => a - b);
-    return values[Math.floor(values.length / 2)];
+  function stableLyricLane(lineIndex, laneCount) {
+    const index = Math.max(0, Math.floor(Number(lineIndex) || 0));
+    return index % Math.max(1, laneCount);
   }
 
   function phraseWordLayouts(ctx, words, fontSize) {
@@ -2810,7 +2725,7 @@
     });
 
     if (hasTimedSegments && !fixedLyrics) {
-      drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8, contour, notes);
+      drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8);
     }
 
     ctx.fillStyle = "rgba(246, 243, 234, 0.72)";
