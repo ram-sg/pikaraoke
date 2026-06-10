@@ -13,6 +13,8 @@
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
   const CONTOUR_TARGET_MAX_GAP_SECONDS = 0.34;
+  const TARGET_BRIDGE_MAX_GAP_SECONDS = 0.9;
+  const TARGET_BRIDGE_MAX_SEMITONES = 2.25;
   const VISUAL_PITCH_HOLD_MS = 420;
   const VISUAL_MIN_MIDI = 36;
   const VISUAL_MAX_MIDI = 84;
@@ -33,6 +35,8 @@
   const PLAYBACK_START_TIMEOUT_MS = 10000;
   const LYRICS_OFFSET_STEP_SECONDS = 0.5;
   const MAX_LYRICS_OFFSET_SECONDS = 120;
+  const VOCAL_REFERENCE_VOLUME = 0.48;
+  const VOCAL_REFERENCE_SYNC_DRIFT_SECONDS = 0.18;
   const CONFIG = window.BiaokeCoachConfig || {};
 
   const TEXT = {
@@ -144,6 +148,9 @@
     latestPitchMidi: null,
     latestPitchHeld: false,
     lastAcceptedPitch: null,
+    vocalReferenceEnabled: false,
+    vocalReferenceAvailable: false,
+    vocalReferenceKey: null,
   };
 
   const els = {};
@@ -205,6 +212,8 @@
       "coach-lyrics-later",
       "coach-lyrics-reset-sync",
       "coach-lyrics-offset",
+      "coach-reference-toggle",
+      "coach-reference-audio",
     ].forEach((id) => {
       els[id] = document.getElementById(id);
     });
@@ -310,6 +319,10 @@
     return els.media;
   }
 
+  function getVocalReferencePlayer() {
+    return els["coach-reference-audio"];
+  }
+
   function setText(id, text) {
     const el = els[id];
     if (el) el.textContent = text;
@@ -332,8 +345,119 @@
       media.removeAttribute("src");
       media.load();
     });
+    clearVocalReferenceAudio();
     els["coach-video-source"].setAttribute("src", "");
     els["coach-video-container"].classList.remove("is-playing");
+  }
+
+  function vocalReferenceUrlForCurrentSong() {
+    const baseUrl = CONFIG.vocalReferenceUrl || "/score/vocal-reference/current";
+    const key = encodeURIComponent(state.nowPlaying.now_playing_url || state.nowPlaying.now_playing || "current");
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${separator}key=${key}`;
+  }
+
+  function updateVocalReferenceControl() {
+    const toggle = els["coach-reference-toggle"];
+    if (!toggle) return;
+    toggle.disabled = !state.vocalReferenceAvailable;
+    toggle.checked = Boolean(state.vocalReferenceEnabled);
+  }
+
+  function setVocalReferenceAvailable(available) {
+    state.vocalReferenceAvailable = Boolean(available);
+    updateVocalReferenceControl();
+    if (!state.vocalReferenceAvailable) {
+      clearVocalReferenceAudio();
+      return;
+    }
+    if (state.vocalReferenceEnabled && isMediaPlaying(getVideoPlayer())) {
+      playVocalReferenceAudio();
+    }
+  }
+
+  function clearVocalReferenceAudio() {
+    const reference = getVocalReferencePlayer();
+    if (!reference) return;
+    reference.pause();
+    reference.removeAttribute("src");
+    reference.load();
+    state.vocalReferenceKey = null;
+  }
+
+  function setVocalReferenceVolume() {
+    const reference = getVocalReferencePlayer();
+    const video = getVideoPlayer();
+    if (!reference) return;
+    reference.volume = clamp((Number(video?.volume) || 1) * VOCAL_REFERENCE_VOLUME, 0, 1);
+  }
+
+  function ensureVocalReferenceAudioLoaded() {
+    const reference = getVocalReferencePlayer();
+    if (!reference || !state.vocalReferenceEnabled || !state.vocalReferenceAvailable) return false;
+    const songKey = state.nowPlaying.now_playing_url || state.nowPlaying.now_playing || "";
+    if (!songKey) return false;
+    if (state.vocalReferenceKey !== songKey) {
+      reference.src = vocalReferenceUrlForCurrentSong();
+      reference.preload = "auto";
+      reference.playbackRate = getVideoPlayer()?.playbackRate || 1;
+      setVocalReferenceVolume();
+      reference.load();
+      state.vocalReferenceKey = songKey;
+    }
+    return true;
+  }
+
+  function syncVocalReferenceToMain(force = false) {
+    const reference = getVocalReferencePlayer();
+    const video = getVideoPlayer();
+    if (!reference || !video || !reference.src) return;
+    const position = Number(video.currentTime || 0);
+    if (!Number.isFinite(position)) return;
+
+    const applySync = () => {
+      if (
+        force ||
+        !Number.isFinite(reference.currentTime) ||
+        Math.abs(reference.currentTime - position) > VOCAL_REFERENCE_SYNC_DRIFT_SECONDS
+      ) {
+        try {
+          reference.currentTime = position;
+        } catch (error) {
+          console.log("Could not sync vocal reference yet", error);
+        }
+      }
+    };
+
+    if (reference.readyState >= 1) {
+      applySync();
+      return;
+    }
+    reference.addEventListener("loadedmetadata", applySync, { once: true });
+  }
+
+  async function playVocalReferenceAudio() {
+    if (!ensureVocalReferenceAudioLoaded()) return;
+    const reference = getVocalReferencePlayer();
+    const video = getVideoPlayer();
+    if (!reference || !video || video.paused) return;
+    syncVocalReferenceToMain(true);
+    try {
+      await reference.play();
+    } catch (error) {
+      console.log("Vocal reference playback blocked", error);
+    }
+  }
+
+  function pauseVocalReferenceAudio() {
+    getVocalReferencePlayer()?.pause();
+  }
+
+  function hasVocalReference(guide) {
+    if (!guide || typeof guide !== "object") return false;
+    if (guide.vocal_reference_available) return true;
+    const assets = guide.assets && typeof guide.assets === "object" ? guide.assets : {};
+    return Boolean(assets.original_audio_path);
   }
 
   function songPlaybackTime(now) {
@@ -370,6 +494,70 @@
       }
     }
     return closest;
+  }
+
+  function bridgedSongNoteAtTime(songTime, notes = songGuideNotes()) {
+    if (!Array.isArray(notes) || notes.length < 2) return null;
+    let previous = null;
+    let previousIndex = -1;
+    let next = null;
+    let nextIndex = -1;
+
+    for (let index = 0; index < notes.length; index++) {
+      const note = notes[index];
+      const start = Number(note.start);
+      const end = Number(note.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      if (end <= songTime && (!previous || end > Number(previous.end))) {
+        previous = note;
+        previousIndex = index;
+      }
+      if (start >= songTime) {
+        next = note;
+        nextIndex = index;
+        break;
+      }
+    }
+
+    if (!previous || !next) return null;
+    const previousEnd = Number(previous.end);
+    const nextStart = Number(next.start);
+    const gapSeconds = nextStart - previousEnd;
+    if (
+      gapSeconds <= 0 ||
+      gapSeconds > TARGET_BRIDGE_MAX_GAP_SECONDS ||
+      songTime < previousEnd ||
+      songTime > nextStart
+    ) {
+      return null;
+    }
+
+    const previousMidi = Number(previous.midi);
+    const nextMidi = Number(next.midi);
+    if (
+      !Number.isFinite(previousMidi) ||
+      !Number.isFinite(nextMidi) ||
+      Math.abs(nextMidi - previousMidi) > TARGET_BRIDGE_MAX_SEMITONES
+    ) {
+      return null;
+    }
+
+    const ratio = clamp((songTime - previousEnd) / gapSeconds, 0, 1);
+    const midi = previousMidi + (nextMidi - previousMidi) * ratio;
+    const confidence =
+      Math.min(Number(previous.confidence ?? 0.6), Number(next.confidence ?? 0.6)) * 0.78;
+    return {
+      note: {
+        start: previousEnd,
+        end: nextStart,
+        midi: Math.round(midi),
+        confidence,
+        pitchBandsCents: previous.pitchBandsCents || next.pitchBandsCents,
+      },
+      index: previousIndex >= 0 ? previousIndex : nextIndex,
+      bridged: true,
+      midi,
+    };
   }
 
   function contourPointAtSongTime(
@@ -419,13 +607,13 @@
   }
 
   function referenceTargetAtSongTime(songTime, notes = songGuideNotes(), contour = songGuideContour()) {
-    const noteMatch = songNoteAtTime(songTime, notes, 0.35);
+    const noteMatch = songNoteAtTime(songTime, notes, 0.35) || bridgedSongNoteAtTime(songTime, notes);
     if (!noteMatch) return null;
 
     const note = noteMatch.note;
     const duration = Math.max(0.05, Number(note.end) - Number(note.start));
     const contourPoint = contourPointAtSongTime(songTime, contour);
-    const midi = contourPoint ? contourPoint.midi : Number(note.midi);
+    const midi = contourPoint ? contourPoint.midi : Number.isFinite(noteMatch.midi) ? noteMatch.midi : Number(note.midi);
     return {
       midi,
       noteMidi: Number(note.midi),
@@ -433,7 +621,7 @@
       cycle: "song",
       duration,
       progress: clamp((songTime - Number(note.start)) / duration, 0, 1),
-      source: contourPoint ? "song-contour" : "song",
+      source: contourPoint ? "song-contour" : noteMatch.bridged ? "song-bridge" : "song",
       songTime,
       confidence: contourPoint ? contourPoint.confidence : Number(note.confidence ?? 0.6),
     };
@@ -957,6 +1145,7 @@
     try {
       await video.play();
       state.playbackConfirmed = true;
+      playVocalReferenceAudio();
     } catch (error) {
       console.log("Video autoplay blocked", error);
       showAutoplayPrompt(true);
@@ -972,6 +1161,7 @@
     if (streamUrl === state.currentVideoUrl) {
       if (Number.isFinite(position) && Math.abs(video.currentTime - position) > PLAYBACK_DRIFT_SECONDS) {
         video.currentTime = position;
+        syncVocalReferenceToMain(true);
       }
       return;
     }
@@ -1026,6 +1216,7 @@
       clearVideo();
       state.songGuide = null;
       state.songSync = null;
+      setVocalReferenceAvailable(false);
       await loadLyrics(null);
       return;
     }
@@ -1044,6 +1235,7 @@
     ) {
       state.songGuide = null;
       state.songSync = null;
+      setVocalReferenceAvailable(false);
       loadSongGuide(true);
     }
 
@@ -1087,6 +1279,11 @@
           paused: Boolean(state.nowPlaying.is_paused),
           receivedAt: performance.now(),
         };
+        if (state.nowPlaying.is_paused) {
+          pauseVocalReferenceAudio();
+        } else if (state.vocalReferenceEnabled) {
+          playVocalReferenceAudio();
+        }
       }
     } catch (error) {
       console.log("Could not poll now playing", error);
@@ -1120,6 +1317,7 @@
       els["coach-song-progress-fill"].style.width = "0%";
     }
     updateLyrics(current);
+    syncVocalReferenceToMain(false);
     drawStageSongRoad(now, currentTarget(now), state.latestPitchMidi);
     state.playbackRafId = requestAnimationFrame(updatePlaybackUi);
   }
@@ -1169,6 +1367,7 @@
     });
     state.socket.on("pause", () => {
       getVideoPlayer().pause();
+      pauseVocalReferenceAudio();
     });
     state.socket.on("play", () => {
       playCurrentVideo();
@@ -1190,11 +1389,13 @@
       } else {
         video.volume = clamp(Number(value), 0, 1);
       }
+      setVocalReferenceVolume();
     });
   }
 
   function setupVideoEvents() {
     const video = getVideoPlayer();
+    const reference = getVocalReferencePlayer();
     video.addEventListener("play", () => {
       els["coach-video-container"].classList.add("is-playing");
       if (state.isMaster && state.socket) {
@@ -1205,8 +1406,23 @@
           }
         }, 1200);
       }
+      playVocalReferenceAudio();
+    });
+    video.addEventListener("pause", () => {
+      pauseVocalReferenceAudio();
+    });
+    video.addEventListener("seeked", () => {
+      syncVocalReferenceToMain(true);
+    });
+    video.addEventListener("ratechange", () => {
+      const reference = getVocalReferencePlayer();
+      if (reference) reference.playbackRate = video.playbackRate || 1;
+    });
+    video.addEventListener("volumechange", () => {
+      setVocalReferenceVolume();
     });
     video.addEventListener("ended", () => {
+      pauseVocalReferenceAudio();
       endCurrentSong("complete");
     });
     video.addEventListener("error", () => {
@@ -1217,6 +1433,12 @@
     els["coach-autoplay-button"].addEventListener("click", () => {
       state.playbackConfirmed = true;
       playCurrentVideo();
+    });
+    reference?.addEventListener("error", () => {
+      if (!reference.src) return;
+      console.log("Vocal reference stream failed");
+      clearVocalReferenceAudio();
+      setVocalReferenceAvailable(false);
     });
     window.addEventListener("beforeunload", () => {
       if (isMediaPlaying(video) && state.isMaster && state.socket) {
@@ -1243,11 +1465,13 @@
       if (guide.notes.length === 0) {
         state.songGuide = null;
         state.songSync = null;
+        setVocalReferenceAvailable(false);
         setStatus(guide.message || TEXT.noGuide, guide.status === "idle" ? "" : "is-warning");
         return null;
       }
 
       state.songGuide = guide;
+      setVocalReferenceAvailable(hasVocalReference(guide));
       state.songSync = {
         position: Number(guide.playback_position || 0),
         paused: Boolean(guide.is_paused),
@@ -1264,6 +1488,7 @@
       console.log("Could not load song melody guide", error);
       state.songGuide = null;
       state.songSync = null;
+      setVocalReferenceAvailable(false);
       setStatus(TEXT.guideError, "is-danger");
       return null;
     } finally {
@@ -1287,6 +1512,7 @@
     const runtime = raw.runtime && typeof raw.runtime === "object" ? raw.runtime : {};
     const melody = raw.melody && typeof raw.melody === "object" ? raw.melody : {};
     const quality = raw.quality && typeof raw.quality === "object" ? raw.quality : {};
+    const assets = raw.assets && typeof raw.assets === "object" ? raw.assets : {};
     const notes = normalizeGuideNotes(raw);
     const contour = normalizeGuideContour(raw);
     return {
@@ -1299,6 +1525,8 @@
       is_paused: Boolean(raw.is_paused ?? runtime.is_paused ?? false),
       quality_messages: raw.quality_messages || quality.messages || melody.quality_messages || [],
       guide_status: raw.guide_status || quality.status || raw.status,
+      vocal_reference_available: Boolean(raw.vocal_reference_available || assets.original_audio_path),
+      assets,
       notes,
       contour,
     };
@@ -1402,12 +1630,14 @@
       if (!data.now_playing) {
         state.songGuide = null;
         state.songSync = null;
+        setVocalReferenceAvailable(false);
         setStatus(TEXT.noSong, "is-warning");
         return;
       }
       if (state.songGuide.title && data.now_playing !== state.songGuide.title) {
         state.songGuide = null;
         state.songSync = null;
+        setVocalReferenceAvailable(false);
         await loadSongGuide(true);
         return;
       }
@@ -2398,6 +2628,15 @@
       updateLyrics(getVideoPlayer().currentTime || 0);
       persistLyricsOffset();
     });
+    els["coach-reference-toggle"].addEventListener("change", () => {
+      state.vocalReferenceEnabled = Boolean(els["coach-reference-toggle"].checked);
+      updateVocalReferenceControl();
+      if (!state.vocalReferenceEnabled) {
+        pauseVocalReferenceAudio();
+        return;
+      }
+      playVocalReferenceAudio();
+    });
     els["coach-preset"].addEventListener("change", async () => {
       resetSession();
       stopSongSync();
@@ -2430,6 +2669,7 @@
     startPositionReporting();
     resetSession();
     setLyricsOffsetDisplay();
+    updateVocalReferenceControl();
     updateReadout({ voiced: false }, null, null, 0);
     draw(performance.now(), null, null);
     drawStageSongRoad(performance.now(), null, null);

@@ -9,6 +9,7 @@
     melodyUrl: "/score/melody/current",
     lyricsUrl: "/score/lyrics/current",
     lyricsOffsetUrl: "/score/lyrics-offset/current",
+    vocalReferenceUrl: "/score/vocal-reference/current",
     nowPlayingUrl: "/now_playing",
   };
 </script>
@@ -68,6 +69,11 @@
         <button id="coach-lyrics-reset-sync" type="button" title="Zerar sincronismo">0</button>
       </div>
 
+      <label class="coach-toggle-control" title="Tocar a faixa original cantada junto com o instrumental">
+        <input id="coach-reference-toggle" type="checkbox" />
+        <span>Voz original</span>
+      </label>
+
       <button id="coach-reset" type="button" title="Reiniciar sessão">Reiniciar</button>
       <button id="coach-fullscreen" type="button" title="Tela cheia">Tela cheia</button>
       <button id="coach-start" class="is-primary" type="button">Iniciar</button>
@@ -95,6 +101,7 @@
         <canvas id="coach-song-road" class="coach-song-road" aria-hidden="true"></canvas>
 
         <audio id="coach-audio" preload="auto"></audio>
+        <audio id="coach-reference-audio" preload="auto"></audio>
 
         <video
           id="coach-video"

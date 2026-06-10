@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import os
 from copy import deepcopy
 from pathlib import Path
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
 from biaoke.lib.current_app import get_karaoke_instance
 from biaoke.lib.scoring import (
@@ -103,6 +104,7 @@ def current_melody_guide():
                     "guide_status": quality.get("status"),
                     "quality_messages": quality.get("messages") or [],
                     "coach_track_id": (coach_guide.get("track") or {}).get("id"),
+                    "vocal_reference_available": _coach_vocal_reference_available(coach_guide),
                 }
             )
             return jsonify(_transpose_guide(melody, int(controller.now_playing_transpose or 0)))
@@ -196,6 +198,37 @@ def current_lyrics_guide():
         }
     )
     return jsonify(lyrics)
+
+
+@score_bp.route("/score/vocal-reference/current")
+def current_vocal_reference():
+    """Stream the original sung track for the active prepared coach song."""
+    k = get_karaoke_instance()
+    controller = k.playback_controller
+    filename = controller.now_playing_filename
+    if not filename:
+        return jsonify({"status": "idle", "message": "Nenhuma música tocando agora."}), 404
+
+    path = Path(filename)
+    if not path.is_file():
+        return jsonify({"status": "error", "message": "Arquivo da música atual não encontrado."}), 404
+
+    coach_guide = _get_coach_guide_for_path(k, path)
+    if not coach_guide:
+        return jsonify({"status": "missing", "message": "Faixa original do coach não encontrada."}), 404
+
+    source_path = _coach_source_media_path(coach_guide)
+    if not source_path or not source_path.is_file():
+        return jsonify({"status": "missing", "message": "Arquivo original do coach não encontrado."}), 404
+
+    mimetype = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    return send_file(
+        source_path,
+        mimetype=mimetype,
+        as_attachment=False,
+        download_name=source_path.name,
+        conditional=True,
+    )
 
 
 @score_bp.route("/score/lyrics-offset/current", methods=["GET", "POST"])
@@ -316,6 +349,7 @@ def current_song_guide():
     if coach_guide:
         payload = deepcopy(coach_guide)
         payload["status"] = (coach_guide.get("quality") or {}).get("status", "unknown")
+        payload["vocal_reference_available"] = _coach_vocal_reference_available(coach_guide)
         payload["runtime"] = {
             "title": controller.now_playing,
             "playback_position": controller.now_playing_position or 0,
@@ -428,6 +462,10 @@ def _coach_source_media_path(coach_guide: dict) -> Path | None:
         return None
     path = Path(str(source))
     return path if path.is_file() else None
+
+
+def _coach_vocal_reference_available(coach_guide: dict) -> bool:
+    return _coach_source_media_path(coach_guide) is not None
 
 
 def _coach_lyrics_offset(coach_guide: dict) -> float:

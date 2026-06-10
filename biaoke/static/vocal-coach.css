@@ -99,6 +99,56 @@ body {
   background: rgba(6, 9, 14, 0.72);
 }
 
+.coach-controls .coach-toggle-control {
+  cursor: pointer;
+  min-height: 36px;
+  user-select: none;
+}
+
+.coach-toggle-control input {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(17, 22, 29, 0.94);
+  position: relative;
+  cursor: pointer;
+}
+
+.coach-toggle-control input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  background: #b9c4c0;
+  transition:
+    transform 0.16s ease,
+    background 0.16s ease;
+}
+
+.coach-toggle-control input:checked {
+  border-color: rgba(31, 216, 169, 0.76);
+  background: rgba(18, 199, 156, 0.34);
+}
+
+.coach-toggle-control input:checked::after {
+  transform: translateX(16px);
+  background: #f8f7ef;
+}
+
+.coach-toggle-control input:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.coach-controls .coach-toggle-control:has(input:disabled) {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
 .coach-controls label span {
   color: #b9c4c0;
   font-size: 12px;
@@ -196,7 +246,8 @@ body {
 }
 
 #coach-video,
-#coach-audio {
+#coach-audio,
+#coach-reference-audio {
   position: absolute;
   inset: 0;
   width: 100%;

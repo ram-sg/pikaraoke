@@ -279,3 +279,44 @@ def test_current_routes_use_prepared_coach_package_for_playing_stem(tmp_path):
     assert melody["notes"][0]["note"] == "C#4"
     assert package["status"] == "ready"
     assert package["runtime"]["title"] == "Artist - Song"
+    assert package["vocal_reference_available"] is True
+
+
+def test_current_vocal_reference_streams_original_for_playing_coach_stem(tmp_path):
+    app = Flask(__name__)
+    app.register_blueprint(score_bp)
+    original_path = tmp_path / "song.mp3"
+    instrumental_path = tmp_path / "song.instrumental.wav"
+    original_path.write_bytes(b"fake original audio")
+    instrumental_path.write_bytes(b"fake instrumental")
+
+    mock_karaoke = MagicMock()
+    controller = mock_karaoke.playback_controller
+    controller.now_playing_filename = str(instrumental_path)
+    mock_karaoke.coach_preparation.load_coach_guide_for_media_path.return_value = {
+        "assets": {"original_audio_path": str(original_path)},
+    }
+    app.config["KARAOKE_INSTANCE"] = mock_karaoke
+
+    response = app.test_client().get("/score/vocal-reference/current")
+
+    assert response.status_code == 200
+    assert response.data == b"fake original audio"
+    assert response.mimetype == "audio/mpeg"
+
+
+def test_current_vocal_reference_returns_missing_without_coach_package(tmp_path):
+    app = Flask(__name__)
+    app.register_blueprint(score_bp)
+    song_path = tmp_path / "song.mp3"
+    song_path.write_bytes(b"fake")
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.playback_controller.now_playing_filename = str(song_path)
+    mock_karaoke.coach_preparation.load_coach_guide_for_media_path.return_value = None
+    app.config["KARAOKE_INSTANCE"] = mock_karaoke
+
+    response = app.test_client().get("/score/vocal-reference/current")
+
+    assert response.status_code == 404
+    assert response.get_json()["status"] == "missing"
