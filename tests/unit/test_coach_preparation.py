@@ -5,8 +5,10 @@ import pytest
 
 from biaoke.lib.coach_preparation import (
     CoachPreparationManager,
+    _lyrics_lines_for_forced_alignment,
     _review_coach_guide_with_ai,
     _review_coach_guide_with_deepseek,
+    _write_coach_guide,
 )
 from biaoke.lib.events import EventSystem
 from biaoke.lib.karaoke_database import KaraokeDatabase
@@ -181,6 +183,134 @@ def test_pending_analysis_writes_coach_guide_and_marks_ready(tmp_path):
     assert coach_guide["tasks"][0]["target_midi"] == 60
     assert coach_guide["tasks"][0]["text"] == "hello"
     db.close()
+
+
+def test_write_coach_guide_prefers_forced_alignment_over_transcript(tmp_path):
+    media_path = tmp_path / "Artist - Aligned---abc12345678.mp4"
+    media_path.write_bytes(b"fake media")
+    lyrics_guide = {
+        "lyrics": {
+            "status": "ready",
+            "confidence": 0.8,
+            "has_karaoke_timing": False,
+            "lines": [{"start": 10.0, "end": 20.0, "text": "hello world"}],
+        }
+    }
+    melody_guide = {
+        "status": "ready",
+        "notes": [{"start": 12.0, "end": 13.0, "midi": 60, "confidence": 0.9}],
+        "contour": [{"time": 12.2, "midi": 60, "confidence": 0.9}],
+    }
+    transcript = {
+        "status": "ready",
+        "engine": "faster-whisper",
+        "words": [{"word": "hello", "start": 15.0, "end": 15.4, "probability": 0.9}],
+    }
+    transcript_alignment = {
+        "status": "ready",
+        "granularity": "word",
+        "paint_units": [{"start": 15.0, "end": 15.4, "text": "hello", "line_index": 0, "unit_index": 0}],
+    }
+    forced_alignment = {
+        "status": "ready",
+        "engine": "torchaudio",
+        "model": "mms_fa",
+        "method": "mms_fa_forced_alignment",
+        "language": "en",
+        "granularity": "word",
+        "paint_units": [
+            {
+                "start": 12.1,
+                "end": 12.45,
+                "text": "hello",
+                "line_index": 0,
+                "unit_index": 0,
+                "confidence": 0.74,
+            },
+            {
+                "start": 12.48,
+                "end": 12.9,
+                "text": "world",
+                "line_index": 0,
+                "unit_index": 1,
+                "confidence": 0.72,
+            },
+        ],
+        "confidence": {"overall": 0.73, "coverage": 1.0},
+    }
+
+    guide_path = _write_coach_guide(
+        media_path,
+        lyrics_guide,
+        melody_guide,
+        transcript=transcript,
+        transcript_alignment=transcript_alignment,
+        forced_alignment=forced_alignment,
+    )
+
+    with open(guide_path, encoding="utf-8") as handle:
+        guide = json.load(handle)
+
+    alignment = guide["lyrics"]["alignment"]
+    assert alignment["method"] == "mms_fa_forced_alignment"
+    assert alignment["paint_units"][0]["start"] == 12.1
+    assert alignment["paint_units"][1]["text"] == "world"
+    assert "line_timing_only" not in guide["quality"]["messages"]
+
+
+def test_forced_alignment_lines_prefer_transcript_word_windows():
+    lyrics = {
+        "status": "ready",
+        "has_karaoke_timing": False,
+        "lines": [{"start": 4.0, "end": 18.0, "text": "It's a God awful small affair"}],
+    }
+    melody = {
+        "contour": [{"time": 9.8, "midi": 60, "confidence": 0.9}],
+        "notes": [{"start": 9.7, "end": 12.8, "midi": 60, "confidence": 0.9}],
+    }
+    transcript_alignment = {
+        "paint_units": [
+            {
+                "start": 9.58,
+                "end": 10.48,
+                "text": "It's",
+                "line_index": 0,
+                "unit_index": 0,
+                "unit_type": "word",
+                "precision": "transcript_word",
+            },
+            {
+                "start": 10.48,
+                "end": 10.7,
+                "text": "a",
+                "line_index": 0,
+                "unit_index": 1,
+                "unit_type": "word",
+                "precision": "transcript_word",
+            },
+            {
+                "start": 10.7,
+                "end": 11.02,
+                "text": "God",
+                "line_index": 0,
+                "unit_index": 2,
+                "unit_type": "word",
+                "precision": "transcript_word",
+            },
+        ]
+    }
+
+    lines = _lyrics_lines_for_forced_alignment(lyrics, melody, transcript_alignment)
+
+    assert lines == [
+        {
+            "line_index": 0,
+            "start": 9.58,
+            "end": 11.02,
+            "text": "It's a God awful small affair",
+            "timing_source": "transcript_words",
+        }
+    ]
 
 
 def test_pending_analysis_filters_pitch_notes_outside_vocal_windows(tmp_path):

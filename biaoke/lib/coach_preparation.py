@@ -39,6 +39,7 @@ DEMUCS_MODEL_ENV = "BIAOKE_COACH_DEMUCS_MODEL"
 STEMS_TIMEOUT_ENV = "BIAOKE_COACH_STEMS_TIMEOUT"
 TRANSCRIBE_TIMEOUT_ENV = "BIAOKE_COACH_TRANSCRIBE_TIMEOUT"
 TRANSCRIBE_MODEL_ENV = "BIAOKE_COACH_TRANSCRIBE_MODEL"
+ALIGN_TIMEOUT_ENV = "BIAOKE_COACH_ALIGN_TIMEOUT"
 AI_REVIEW_PROVIDER_ENV = "AI_REVIEW_PROVIDER"
 DEEPSEEK_API_KEY_ENV = "DEEPSEEK_API_KEY"
 DEEPSEEK_BASE_URL_ENV = "DEEPSEEK_BASE_URL"
@@ -77,6 +78,9 @@ AI_REVIEW_MAX_LINES = 320
 AI_REVIEW_MAX_PAINT_UNITS = 5000
 AI_REVIEW_MAX_TRANSCRIPT_WORDS = 1200
 AI_REVIEW_MAX_NOTES = 700
+FORCED_ALIGNMENT_MIN_CONFIDENCE = 0.18
+FORCED_ALIGNMENT_MIN_COVERAGE = 0.35
+FORCED_ALIGNMENT_LINE_MIN_TRANSCRIPT_COVERAGE = 0.32
 
 
 class CoachPreparationManager:
@@ -546,6 +550,18 @@ class CoachPreparationManager:
                 lyrics_guide.get("lyrics") or {},
                 transcript,
             )
+            transcript_alignment = build_word_alignment_from_transcript(
+                lyrics_guide.get("lyrics") or {},
+                transcript.get("words") if isinstance(transcript, dict) else [],
+                method="faster_whisper_word_alignment",
+            )
+            forced_alignment = _align_coach_lyrics(
+                melody_source_path,
+                lyrics_guide.get("lyrics") or {},
+                melody_guide,
+                transcript,
+                transcript_alignment=transcript_alignment,
+            )
             self._db.update_coach_job(job_id, stage="write_coach_guide", progress=85)
             coach_guide_path = _write_coach_guide(
                 media_path,
@@ -554,6 +570,8 @@ class CoachPreparationManager:
                 stems=stems,
                 melody_source_path=melody_source_path,
                 transcript=transcript,
+                transcript_alignment=transcript_alignment,
+                forced_alignment=forced_alignment,
             )
         except (OSError, ScoreAnalysisError, ValueError) as exc:
             logging.warning("Coach analysis failed for %s: %s", media_path, exc)
@@ -566,7 +584,15 @@ class CoachPreparationManager:
             self._db.update_coach_track(track_id, status=FAILED_STATUS)
             return
 
-        quality_status = _coach_quality_status(lyrics_guide, melody_guide, stems)
+        quality_status = _coach_quality_status(
+            _lyrics_guide_for_quality(
+                lyrics_guide,
+                forced_alignment=forced_alignment,
+                transcript_alignment=transcript_alignment,
+            ),
+            melody_guide,
+            stems,
+        )
         track_status = READY_STATUS if quality_status == "ready" else NEEDS_REVIEW_STATUS
         self._db.set_coach_assets(
             track_id,
@@ -677,6 +703,8 @@ def _write_coach_guide(
     stems: dict[str, Any] | None = None,
     melody_source_path: str | Path | None = None,
     transcript: dict[str, Any] | None = None,
+    transcript_alignment: dict[str, Any] | None = None,
+    forced_alignment: dict[str, Any] | None = None,
 ) -> Path:
     path = _coach_guide_path(media_path)
     melody_guide = _filter_melody_to_vocal_windows(
@@ -685,13 +713,22 @@ def _write_coach_guide(
         transcript,
     )
     lyrics = with_vocal_activity_alignment(lyrics_guide.get("lyrics") or {}, melody_guide)
-    word_alignment = build_word_alignment_from_transcript(
-        lyrics_guide.get("lyrics") or {},
-        transcript.get("words") if isinstance(transcript, dict) else [],
-        method="faster_whisper_word_alignment",
-    )
-    if word_alignment:
-        lyrics["alignment"] = word_alignment
+    if _is_usable_forced_alignment(forced_alignment):
+        forced_payload = _forced_alignment_payload(forced_alignment)
+        if transcript_alignment:
+            forced_payload = _merge_alignment_with_fallback(forced_payload, transcript_alignment)
+        lyrics["alignment"] = forced_payload
+    elif transcript_alignment:
+        lyrics["alignment"] = transcript_alignment
+    else:
+        word_alignment = build_word_alignment_from_transcript(
+            lyrics_guide.get("lyrics") or {},
+            transcript.get("words") if isinstance(transcript, dict) else [],
+            method="faster_whisper_word_alignment",
+        )
+        if word_alignment:
+            lyrics["alignment"] = word_alignment
+    quality_lyrics_guide = {"lyrics": lyrics}
     payload = {
         "schema": COACH_GUIDE_SCHEMA,
         "version": COACH_GUIDE_VERSION,
@@ -706,11 +743,11 @@ def _write_coach_guide(
         "melody": melody_guide,
         "tasks": _build_pitch_tasks(lyrics_guide, melody_guide),
         "quality": {
-            "status": _coach_quality_status(lyrics_guide, melody_guide, stems),
+            "status": _coach_quality_status(quality_lyrics_guide, melody_guide, stems),
             "lyrics_ready": (lyrics_guide.get("lyrics") or {}).get("status") == "ready",
             "melody_ready": bool(melody_guide.get("notes")),
             "vocal_stem_ready": bool(stems and stems.get("vocals_path")),
-            "messages": _coach_quality_messages(lyrics_guide, melody_guide, stems),
+            "messages": _coach_quality_messages(quality_lyrics_guide, melody_guide, stems),
         },
     }
     tmp_path = path.with_name(path.name + ".tmp")
@@ -719,6 +756,126 @@ def _write_coach_guide(
         handle.write("\n")
     os.replace(tmp_path, path)
     return path
+
+
+def _is_usable_forced_alignment(alignment: dict[str, Any] | None) -> bool:
+    if not isinstance(alignment, dict) or alignment.get("status") != "ready":
+        return False
+    units = alignment.get("paint_units") if isinstance(alignment.get("paint_units"), list) else []
+    if not units:
+        return False
+    confidence = alignment.get("confidence") if isinstance(alignment.get("confidence"), dict) else {}
+    overall = _safe_float(confidence.get("overall"))
+    coverage = _safe_float(confidence.get("coverage"))
+    if overall is not None and overall < FORCED_ALIGNMENT_MIN_CONFIDENCE:
+        return False
+    if coverage is not None and coverage < FORCED_ALIGNMENT_MIN_COVERAGE:
+        return False
+    return True
+
+
+def _forced_alignment_payload(alignment: dict[str, Any]) -> dict[str, Any]:
+    raw_units = alignment.get("paint_units") if isinstance(alignment.get("paint_units"), list) else []
+    units = []
+    previous_end = 0.0
+    previous_line: int | None = None
+    for raw_unit in raw_units:
+        if not isinstance(raw_unit, dict):
+            continue
+        start = _safe_float(raw_unit.get("start"))
+        end = _safe_float(raw_unit.get("end"))
+        text = str(raw_unit.get("text") or "").strip()
+        if start is None or end is None or end <= start or not text:
+            continue
+        line_index = _safe_int(raw_unit.get("line_index"), default=0)
+        if previous_line is not None and line_index != previous_line:
+            previous_end = 0.0
+        if start < previous_end:
+            start = previous_end
+            end = max(end, start + 0.06)
+        unit = {
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": text,
+            "line_index": line_index,
+            "unit_index": _safe_int(raw_unit.get("unit_index"), default=len(units)),
+            "unit_type": "word",
+            "precision": str(raw_unit.get("precision") or "mms_fa_forced_alignment"),
+            "confidence": round(max(0.0, min(1.0, _safe_float(raw_unit.get("confidence")) or 0.0)), 3),
+        }
+        units.append(unit)
+        previous_end = float(unit["end"])
+        previous_line = line_index
+
+    return {
+        "schema": ALIGNMENT_SCHEMA,
+        "version": ALIGNMENT_VERSION,
+        "status": "ready" if units else "missing",
+        "method": str(alignment.get("method") or "mms_fa_forced_alignment"),
+        "language": alignment.get("language") or "auto",
+        "granularity": "word",
+        "engine": alignment.get("engine"),
+        "model": alignment.get("model"),
+        "device": alignment.get("device"),
+        "paint_units": units,
+        "confidence": alignment.get("confidence") or {"overall": 0.0},
+    }
+
+
+def _merge_alignment_with_fallback(
+    primary_alignment: dict[str, Any],
+    fallback_alignment: dict[str, Any],
+) -> dict[str, Any]:
+    primary_units = primary_alignment.get("paint_units") if isinstance(primary_alignment.get("paint_units"), list) else []
+    fallback_units = fallback_alignment.get("paint_units") if isinstance(fallback_alignment.get("paint_units"), list) else []
+    primary_lines = {
+        _safe_int(unit.get("line_index"), default=-1)
+        for unit in primary_units
+        if isinstance(unit, dict)
+    }
+    merged_units = [dict(unit) for unit in primary_units if isinstance(unit, dict)]
+    fallback_count = 0
+    for unit in fallback_units:
+        if not isinstance(unit, dict):
+            continue
+        line_index = _safe_int(unit.get("line_index"), default=-1)
+        if line_index in primary_lines:
+            continue
+        merged_units.append(dict(unit))
+        fallback_count += 1
+
+    if fallback_count <= 0:
+        return primary_alignment
+
+    merged_units.sort(
+        key=lambda unit: (
+            _safe_int(unit.get("line_index"), default=0),
+            _safe_int(unit.get("unit_index"), default=0),
+            _safe_float(unit.get("start")) or 0.0,
+        )
+    )
+    merged_alignment = dict(primary_alignment)
+    merged_alignment["method"] = f"{primary_alignment.get('method') or 'forced_alignment'}+fallback"
+    merged_alignment["paint_units"] = merged_units
+    confidence = dict(primary_alignment.get("confidence") or {})
+    confidence["fallback_units"] = fallback_count
+    confidence["fallback_method"] = fallback_alignment.get("method")
+    merged_alignment["confidence"] = confidence
+    return merged_alignment
+
+
+def _lyrics_guide_for_quality(
+    lyrics_guide: dict[str, Any],
+    *,
+    forced_alignment: dict[str, Any] | None = None,
+    transcript_alignment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    lyrics = dict(lyrics_guide.get("lyrics") or {})
+    if _is_usable_forced_alignment(forced_alignment):
+        lyrics["alignment"] = _forced_alignment_payload(forced_alignment or {})
+    elif transcript_alignment:
+        lyrics["alignment"] = transcript_alignment
+    return {"lyrics": lyrics}
 
 
 def _review_coach_guide_with_ai(track: dict[str, Any], guide: dict[str, Any]) -> dict[str, Any]:
@@ -1781,7 +1938,11 @@ def _coach_quality_messages(
         messages.append("needs_melody")
     if not stems or not stems.get("vocals_path"):
         messages.append("mix_melody_only")
-    if lyrics.get("status") == "ready" and not lyrics.get("has_karaoke_timing"):
+    if (
+        lyrics.get("status") == "ready"
+        and not lyrics.get("has_karaoke_timing")
+        and not _lyrics_has_precise_alignment(lyrics)
+    ):
         messages.append("line_timing_only")
     if _lyrics_duration_mismatch(lyrics, melody_guide):
         messages.append("lyrics_duration_mismatch")
@@ -1799,6 +1960,17 @@ def _lyrics_duration_mismatch(lyrics: dict[str, Any], melody_guide: dict[str, An
         return False
     tolerance = max(LYRICS_DURATION_TOLERANCE_SECONDS, duration * LYRICS_DURATION_TOLERANCE_RATIO)
     return lyrics_end > duration + tolerance
+
+
+def _lyrics_has_precise_alignment(lyrics: dict[str, Any]) -> bool:
+    alignment = lyrics.get("alignment") if isinstance(lyrics.get("alignment"), dict) else {}
+    units = alignment.get("paint_units") if isinstance(alignment.get("paint_units"), list) else []
+    granularity = str(alignment.get("granularity") or "").strip().casefold()
+    return (
+        alignment.get("status") == "ready"
+        and granularity in {"word", "segment", "syllable"}
+        and bool(units)
+    )
 
 
 def _melody_ends_before_lyrics(lyrics: dict[str, Any], melody_guide: dict[str, Any]) -> bool:
@@ -1928,6 +2100,14 @@ def _transcribe_timeout_seconds() -> int:
         return 1200
 
 
+def _align_timeout_seconds() -> int:
+    raw_value = os.environ.get(ALIGN_TIMEOUT_ENV)
+    try:
+        return max(300, min(3600, int(raw_value or 1200)))
+    except ValueError:
+        return 1200
+
+
 def _deepseek_timeout_seconds() -> int:
     raw_value = os.environ.get(DEEPSEEK_TIMEOUT_ENV)
     try:
@@ -1989,6 +2169,181 @@ def _transcribe_coach_vocals_with_service(service_url: str, media_path: Path) ->
         "language_probability": payload.get("language_probability"),
         "words": payload.get("words") or [],
     }
+
+
+def _align_coach_lyrics(
+    media_path: Path,
+    lyrics: dict[str, Any],
+    melody_guide: dict[str, Any],
+    transcript: dict[str, Any] | None,
+    *,
+    transcript_alignment: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    service_url = os.environ.get(SCORING_SERVICE_ENV, "").strip()
+    if not service_url:
+        return None
+
+    lines = _lyrics_lines_for_forced_alignment(lyrics, melody_guide, transcript_alignment)
+    if not lines:
+        return None
+
+    try:
+        return _align_coach_lyrics_with_service(
+            service_url,
+            media_path,
+            lines,
+            language=_transcript_language(transcript),
+        )
+    except requests.RequestException as exc:
+        logging.warning("Coach forced lyric alignment failed for %s: %s", media_path, exc)
+        return None
+
+
+def _align_coach_lyrics_with_service(
+    service_url: str,
+    media_path: Path,
+    lines: list[dict[str, Any]],
+    *,
+    language: str | None,
+) -> dict[str, Any] | None:
+    base_url = service_url.rsplit("/", 1)[0]
+    response = requests.post(
+        f"{base_url}/align-lyrics",
+        json={
+            "input_path": str(media_path),
+            "language": language or "auto",
+            "model": "mms_fa",
+            "lines": lines,
+        },
+        timeout=_align_timeout_seconds(),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if _is_usable_forced_alignment(payload):
+        return payload
+    logging.info(
+        "Coach forced lyric alignment not usable for %s: %s",
+        media_path,
+        (payload or {}).get("reason") if isinstance(payload, dict) else "invalid_payload",
+    )
+    return None
+
+
+def _lyrics_lines_for_forced_alignment(
+    lyrics: dict[str, Any],
+    melody_guide: dict[str, Any],
+    transcript_alignment: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(lyrics, dict) or lyrics.get("status") != "ready":
+        return []
+    source_lines = lyrics.get("lines") if isinstance(lyrics.get("lines"), list) else []
+    if not source_lines:
+        return []
+
+    refined_lyrics = with_vocal_activity_alignment(lyrics, melody_guide)
+    refined_windows = _line_windows_from_alignment(refined_lyrics.get("alignment") or {})
+    transcript_windows = _line_windows_from_word_alignment(transcript_alignment, source_lines)
+    lines = []
+    previous_start = 0.0
+    for line_index, line in enumerate(source_lines):
+        if not isinstance(line, dict):
+            continue
+        text = re.sub(r"\s+", " ", str(line.get("text") or "")).strip()
+        if not text:
+            continue
+        timing_source = "transcript_words"
+        window = transcript_windows.get(line_index)
+        if not window:
+            window = refined_windows.get(line_index)
+            timing_source = "line_activity" if window else "line_timing"
+        start, end = window or _raw_line_window(line)
+        if start is None or end is None or end <= start:
+            continue
+        start = max(0.0, start)
+        if start + 0.08 < previous_start:
+            start = previous_start
+        end = max(end, start + 0.2)
+        lines.append(
+            {
+                "line_index": line_index,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": text,
+                "timing_source": timing_source,
+            }
+        )
+        previous_start = start
+    return lines
+
+
+def _line_windows_from_alignment(alignment: dict[str, Any]) -> dict[int, tuple[float, float]]:
+    units = alignment.get("paint_units") if isinstance(alignment.get("paint_units"), list) else []
+    windows: dict[int, tuple[float, float]] = {}
+    for unit in units:
+        if not isinstance(unit, dict) or unit.get("unit_type") != "line":
+            continue
+        start = _safe_float(unit.get("start"))
+        end = _safe_float(unit.get("end"))
+        line_index = _safe_int(unit.get("line_index"), default=-1)
+        if line_index < 0 or start is None or end is None or end <= start:
+            continue
+        windows[line_index] = (start, end)
+    return windows
+
+
+def _line_windows_from_word_alignment(
+    alignment: dict[str, Any] | None,
+    source_lines: list[Any],
+) -> dict[int, tuple[float, float]]:
+    if not isinstance(alignment, dict):
+        return {}
+    units = alignment.get("paint_units") if isinstance(alignment.get("paint_units"), list) else []
+    by_line: dict[int, list[dict[str, Any]]] = {}
+    for unit in units:
+        if not isinstance(unit, dict):
+            continue
+        if str(unit.get("unit_type") or "").strip().casefold() != "word":
+            continue
+        if "interpolated" in str(unit.get("precision") or ""):
+            continue
+        start = _safe_float(unit.get("start"))
+        end = _safe_float(unit.get("end"))
+        line_index = _safe_int(unit.get("line_index"), default=-1)
+        if line_index < 0 or start is None or end is None or end <= start:
+            continue
+        by_line.setdefault(line_index, []).append(unit)
+
+    windows = {}
+    for line_index, line_units in by_line.items():
+        if line_index >= len(source_lines):
+            continue
+        line = source_lines[line_index] if isinstance(source_lines[line_index], dict) else {}
+        word_count = max(1, _lyric_word_count(str(line.get("text") or "")))
+        coverage = len(line_units) / word_count
+        if coverage < FORCED_ALIGNMENT_LINE_MIN_TRANSCRIPT_COVERAGE:
+            continue
+        start = min(float(unit["start"]) for unit in line_units)
+        end = max(float(unit["end"]) for unit in line_units)
+        if end > start:
+            windows[line_index] = (start, end)
+    return windows
+
+
+def _raw_line_window(line: dict[str, Any]) -> tuple[float | None, float | None]:
+    return _safe_float(line.get("start")), _safe_float(line.get("end"))
+
+
+def _lyric_word_count(text: str) -> int:
+    return len(re.findall(r"[^\W_]+(?:['’][^\W_]+)*", str(text or ""), flags=re.UNICODE))
+
+
+def _transcript_language(transcript: dict[str, Any] | None) -> str | None:
+    if not isinstance(transcript, dict):
+        return None
+    value = str(transcript.get("language") or "").strip()
+    if not value:
+        return None
+    return value
 
 
 def _extract_coach_melody_with_service(service_url: str, media_path: Path) -> dict[str, Any]:

@@ -2054,7 +2054,7 @@
           lineIndex: Number(unit.line_index ?? 0),
           segmentIndex: Number(unit.unit_index ?? unitIndex),
           precision: String(unit.precision || unit.unit_type || "alignment"),
-          unitType: String(unit.unit_type || "unit"),
+          unitType: String(unit.unit_type || "unit").toLowerCase(),
         };
       })
       .filter(Boolean)
@@ -2136,7 +2136,8 @@
 
     const offset = Number(state.lyricsOffsetSeconds || 0);
     const unitsByLine = new Map();
-    normalizedLyricPaintUnits()
+    const normalizedUnits = normalizedLyricPaintUnits();
+    normalizedUnits
       .filter((unit) => unit.unitType === "word")
       .forEach((unit) => {
         const lineIndex = Number.isFinite(unit.lineIndex) ? unit.lineIndex : 0;
@@ -2145,12 +2146,27 @@
         if (!lineUnits.has(unit.segmentIndex)) lineUnits.set(unit.segmentIndex, unit);
       });
 
+    const lineTimingsByLine = new Map();
+    normalizedUnits
+      .filter((unit) => unit.unitType === "line")
+      .forEach((unit) => {
+        const lineIndex = Number.isFinite(unit.lineIndex) ? unit.lineIndex : 0;
+        const start = Number(unit.start);
+        const end = Number(unit.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+        const current = lineTimingsByLine.get(lineIndex);
+        if (!current || end - start < current.end - current.start) {
+          lineTimingsByLine.set(lineIndex, { start, end });
+        }
+      });
+
     const segments = [];
     state.lyrics.forEach((line, lineIndex) => {
       const words = splitLyricCaptionWords(line.text);
       if (!words.length) return;
-      const lineStart = Number(line.start) + offset;
-      const lineEnd = Number(line.end) + offset;
+      const lineTiming = lineTimingsByLine.get(lineIndex);
+      const lineStart = Number.isFinite(lineTiming?.start) ? lineTiming.start : Number(line.start) + offset;
+      const lineEnd = Number.isFinite(lineTiming?.end) ? lineTiming.end : Number(line.end) + offset;
       if (!Number.isFinite(lineStart) || !Number.isFinite(lineEnd) || lineEnd <= lineStart) return;
 
       const lineUnits = unitsByLine.get(lineIndex) || new Map();
@@ -2476,7 +2492,7 @@
     return tokens?.length ? tokens : cleanText.split(/\s+/).filter(Boolean);
   }
 
-  function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY) {
+  function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY, hitX) {
     if (!phrases.length) return false;
 
     const laneHeight = LYRIC_ROAD_LANE_HEIGHT;
@@ -2530,10 +2546,9 @@
         ctx.fillText(word.text, x, y);
 
         if (!wordActive) return;
-        const progress = clamp((songTime - word.start) / Math.max(0.08, word.end - word.start), 0, 1);
         ctx.save();
         ctx.beginPath();
-        ctx.rect(x, y - fontSize, Math.max(1, layout.width * progress), fontSize * 2);
+        ctx.rect(x, y - fontSize, Math.max(1, clamp(hitX, x, layout.endX) - x), fontSize * 2);
         ctx.clip();
         ctx.globalAlpha = 1;
         ctx.fillStyle = "rgba(18, 199, 156, 1)";
@@ -2657,11 +2672,13 @@
     let maxX = -Infinity;
     words.forEach((word) => {
       const width = ctx.measureText(word.text).width;
-      const timedX = xForTime(Number(word.start));
-      const x = timedX + 4;
-      items.push({ word, x, width });
+      const startX = xForTime(Number(word.start));
+      const endX = xForTime(Number(word.end));
+      const x = startX + 6;
+      const slotEndX = Math.max(x + 1, endX - 6);
+      items.push({ word, x, endX: slotEndX, width });
       minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x + width);
+      maxX = Math.max(maxX, x + width, slotEndX);
     });
     if (!items.length) {
       return { items: [], minX: Infinity, maxX: -Infinity };
@@ -2725,7 +2742,7 @@
     });
 
     if (hasTimedSegments && !fixedLyrics) {
-      drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8);
+      drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8, hitX);
     }
 
     ctx.fillStyle = "rgba(246, 243, 234, 0.72)";
