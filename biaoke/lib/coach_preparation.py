@@ -51,6 +51,7 @@ VOCAL_FILTER_MIN_NOTE_SECONDS = 0.14
 VOCAL_FILTER_LINE_BASE_SECONDS = 1.0
 VOCAL_FILTER_LINE_SECONDS_PER_WORD = 0.8
 VOCAL_FILTER_LINE_MIN_SECONDS = 2.6
+VOCAL_FILTER_MIN_TRANSCRIPT_LINE_COVERAGE = 0.45
 VOCAL_FILTER_VERSION = 3
 
 
@@ -623,15 +624,22 @@ def _vocal_timing_windows(
     transcript: dict[str, Any] | None,
 ) -> tuple[list[tuple[float, float]], str]:
     transcript_windows = _transcript_word_windows(transcript)
-    lyric_windows = _karaoke_lyric_windows(lyrics)
-    line_windows = _line_lyric_windows(lyrics)
+    has_transcript = bool(transcript_windows)
+    lyric_windows = _karaoke_lyric_windows(lyrics, merge=not has_transcript)
+    line_windows = _line_lyric_windows(lyrics, merge=not has_transcript)
 
     if transcript_windows and lyric_windows:
+        lyric_windows = _windows_missing_transcript_coverage(lyric_windows, transcript_windows)
+        if not lyric_windows:
+            return transcript_windows, "transcript_words"
         return _merge_time_windows(
             transcript_windows + lyric_windows,
             VOCAL_FILTER_MERGE_GAP_SECONDS,
         ), "transcript_words+karaoke_lyrics"
     if transcript_windows and line_windows:
+        line_windows = _windows_missing_transcript_coverage(line_windows, transcript_windows)
+        if not line_windows:
+            return transcript_windows, "transcript_words"
         return _merge_time_windows(
             transcript_windows + line_windows,
             VOCAL_FILTER_MERGE_GAP_SECONDS,
@@ -646,6 +654,30 @@ def _vocal_timing_windows(
         return line_windows, "line_lyrics"
 
     return [], "none"
+
+
+def _windows_missing_transcript_coverage(
+    candidate_windows: list[tuple[float, float]],
+    transcript_windows: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    missing = []
+    for start, end in candidate_windows:
+        duration = max(0.001, end - start)
+        coverage = _window_overlap_seconds(start, end, transcript_windows) / duration
+        if coverage < VOCAL_FILTER_MIN_TRANSCRIPT_LINE_COVERAGE:
+            missing.append((start, end))
+    return missing
+
+
+def _window_overlap_seconds(
+    start: float,
+    end: float,
+    windows: list[tuple[float, float]],
+) -> float:
+    total = 0.0
+    for window_start, window_end in windows:
+        total += max(0.0, min(end, window_end) - max(start, window_start))
+    return total
 
 
 def _transcript_word_windows(transcript: dict[str, Any] | None) -> list[tuple[float, float]]:
@@ -673,7 +705,7 @@ def _transcript_word_windows(transcript: dict[str, Any] | None) -> list[tuple[fl
     return _merge_time_windows(intervals, VOCAL_FILTER_MERGE_GAP_SECONDS)
 
 
-def _karaoke_lyric_windows(lyrics: dict[str, Any] | None) -> list[tuple[float, float]]:
+def _karaoke_lyric_windows(lyrics: dict[str, Any] | None, *, merge: bool = True) -> list[tuple[float, float]]:
     if not isinstance(lyrics, dict) or not lyrics.get("has_karaoke_timing"):
         return []
     intervals = []
@@ -690,10 +722,12 @@ def _karaoke_lyric_windows(lyrics: dict[str, Any] | None) -> list[tuple[float, f
             text = str(segment.get("text") or "").strip()
             if text and start is not None and end is not None and end > start:
                 intervals.append((max(0.0, start - VOCAL_FILTER_LEAD_SECONDS), end + VOCAL_FILTER_TAIL_SECONDS))
+    if not merge:
+        return intervals
     return _merge_time_windows(intervals, VOCAL_FILTER_MERGE_GAP_SECONDS)
 
 
-def _line_lyric_windows(lyrics: dict[str, Any] | None) -> list[tuple[float, float]]:
+def _line_lyric_windows(lyrics: dict[str, Any] | None, *, merge: bool = True) -> list[tuple[float, float]]:
     if not isinstance(lyrics, dict) or lyrics.get("status") != "ready":
         return []
     lines = lyrics.get("lines") if isinstance(lyrics.get("lines"), list) else []
@@ -710,6 +744,8 @@ def _line_lyric_windows(lyrics: dict[str, Any] | None) -> list[tuple[float, floa
         intervals.append((max(0.0, start - VOCAL_FILTER_LEAD_SECONDS), estimated_end + VOCAL_FILTER_TAIL_SECONDS))
     if len(intervals) < 2:
         return []
+    if not merge:
+        return intervals
     return _merge_time_windows(intervals, VOCAL_FILTER_MERGE_GAP_SECONDS)
 
 
