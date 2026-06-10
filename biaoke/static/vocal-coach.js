@@ -11,6 +11,14 @@
   const STAGE_ROAD_MIN_HEIGHT = 300;
   const LYRIC_SILENCE_CUE_COUNT = 5;
   const LYRIC_SILENCE_MIN_GAP_SECONDS = 0.25;
+  const VOCAL_TIMELINE_MIN_SEGMENT_SECONDS = 0.035;
+  const VOCAL_TIMELINE_SHORT_SILENCE_RATE = 0.72;
+  const VOCAL_TIMELINE_LONG_SILENCE_RATE = 0.34;
+  const VOCAL_TIMELINE_NOTE_RATE = 1.0;
+  const VOCAL_TIMELINE_TEXT_PADDING = 22;
+  const VOCAL_TIMELINE_MAX_TEXT_WIDTH = 240;
+  const VOCAL_TIMELINE_MAX_DENSE_RATE = 2.85;
+  const VOCAL_TIMELINE_CONTOUR_GAP_SECONDS = 0.48;
   const TRAIL_MIN_CONFIDENCE = 0.52;
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
@@ -2367,80 +2375,217 @@
     };
   }
 
-  function lyricAwareRoadTimeScale(ctx, width, songTime, notes) {
+  function vocalRoadTimeScale(ctx, width, songTime, notes, contour = songGuideContour()) {
     const fallback = fixedRoadTimeScale(width, songTime, notes);
-    const timingUnits = lyricRoadTimingUnits();
-    if (!timingUnits.length) return fallback;
 
-    const intervals = lyricVisualIntervals(ctx, timingUnits, fallback.pixelsPerSecond);
+    const intervals = vocalVisualIntervals(ctx, notes, contour, fallback.pixelsPerSecond);
     if (!intervals.length) return fallback;
 
     const currentVisual = visualPositionAtTime(songTime, intervals, fallback.pixelsPerSecond);
     const minVisual = currentVisual - fallback.hitX - 160;
     const maxVisual = currentVisual + (width - fallback.hitX) + 220;
+    const minTime = timeAtVisualPosition(minVisual, intervals, fallback.pixelsPerSecond);
+    const maxTime = timeAtVisualPosition(maxVisual, intervals, fallback.pixelsPerSecond);
     return {
-      mode: "lyric",
+      mode: "vocal",
       hitX: fallback.hitX,
       lookaheadSeconds: fallback.lookaheadSeconds,
       pixelsPerSecond: fallback.pixelsPerSecond,
-      minTime: timeAtVisualPosition(minVisual, intervals, fallback.pixelsPerSecond),
-      maxTime: timeAtVisualPosition(maxVisual, intervals, fallback.pixelsPerSecond),
+      minTime: Math.max(songTime - STAGE_ROAD_MAX_LOOKAHEAD_SECONDS, minTime),
+      maxTime: Math.min(songTime + STAGE_ROAD_MAX_LOOKAHEAD_SECONDS, maxTime),
       xForTime: (time) =>
         fallback.hitX + visualPositionAtTime(time, intervals, fallback.pixelsPerSecond) - currentVisual,
     };
   }
 
-  function lyricVisualIntervals(ctx, units, pixelsPerSecond) {
-    const firstUnit = units[0];
-    const lastUnit = units[units.length - 1];
+  function vocalVisualIntervals(ctx, notes, contour, pixelsPerSecond) {
+    const lyricUnits = lyricRoadTimingUnits();
+    const firstNote = notes[0];
+    const lastNote = notes[notes.length - 1];
+    const firstContour = contour[0];
+    const lastContour = contour[contour.length - 1];
     const cacheKey = [
       lyricContentCacheKey(),
-      units.length,
-      firstUnit?.unitType || "",
-      lastUnit?.unitType || "",
+      lyricUnits.length,
+      notes.length,
+      Number(firstNote?.start ?? 0).toFixed(3),
+      Number(lastNote?.end ?? 0).toFixed(3),
+      contour.length,
+      Number(firstContour?.time ?? 0).toFixed(3),
+      Number(lastContour?.time ?? 0).toFixed(3),
       Math.round(pixelsPerSecond * 100),
     ].join("|");
     if (state.lyricVisualCacheKey === cacheKey && state.lyricVisualIntervals) return state.lyricVisualIntervals;
-    const intervals = buildLyricVisualIntervals(ctx, units, pixelsPerSecond);
+    const intervals = buildVocalVisualIntervals(ctx, lyricUnits, notes, contour, pixelsPerSecond);
     state.lyricVisualCacheKey = cacheKey;
     state.lyricVisualIntervals = intervals;
     return intervals;
   }
 
-  function buildLyricVisualIntervals(ctx, units, pixelsPerSecond) {
+  function buildVocalVisualIntervals(ctx, lyricUnits, notes, contour, pixelsPerSecond) {
+    const lyricEvents = lyricTimelineEvents(ctx, lyricUnits, pixelsPerSecond);
+    const noteEvents = noteTimelineEvents(notes);
+    const contourEvents = contourTimelineEvents(contour);
+    const events = [...lyricEvents, ...noteEvents, ...contourEvents].sort(
+      (a, b) => a.start - b.start || a.end - b.end
+    );
+    if (!events.length) return [];
+
+    const breakpoints = new Set();
+    events.forEach((event) => {
+      breakpoints.add(roundTimelineTime(event.start));
+      breakpoints.add(roundTimelineTime(event.end));
+    });
+    const orderedBreakpoints = [...breakpoints]
+      .map((value) => Number(value))
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+
     const intervals = [];
     let cursor = 0;
-    let previous = null;
-    ctx.save();
-    ctx.font = "900 23px sans-serif";
-
-    units.forEach((unit) => {
-      const start = Number(unit.start);
-      const end = Number(unit.end);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
-
-      if (previous) {
-        const gapSeconds = Math.max(0, start - previous.end);
-        if (gapSeconds > 0.04) {
-          cursor += gapSeconds * pixelsPerSecond;
-        }
+    let previousEnd = orderedBreakpoints[0];
+    for (let index = 0; index < orderedBreakpoints.length - 1; index++) {
+      const start = orderedBreakpoints[index];
+      const end = orderedBreakpoints[index + 1];
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < VOCAL_TIMELINE_MIN_SEGMENT_SECONDS) {
+        continue;
       }
 
-      const textWidth = ctx.measureText(unit.text).width;
-      const durationWidth = (end - start) * pixelsPerSecond;
-      const minimumWidth = clamp(textWidth + 20, 28, 240);
-      const visualWidth = Math.max(durationWidth, minimumWidth);
+      if (start - previousEnd >= VOCAL_TIMELINE_MIN_SEGMENT_SECONDS) {
+        const gapWidth = visualWidthForTimelineSegment(
+          previousEnd,
+          start,
+          [],
+          pixelsPerSecond
+        );
+        intervals.push({
+          start: previousEnd,
+          end: start,
+          visualStart: cursor,
+          visualEnd: cursor + gapWidth,
+          kind: "silence",
+        });
+        cursor += gapWidth;
+      }
+
+      const activeEvents = events.filter((event) => event.end > start && event.start < end);
+      const visualWidth = visualWidthForTimelineSegment(start, end, activeEvents, pixelsPerSecond);
       intervals.push({
-        ...unit,
+        start,
+        end,
         visualStart: cursor,
         visualEnd: cursor + visualWidth,
+        kind: timelineSegmentKind(activeEvents),
       });
       cursor += visualWidth;
-      previous = unit;
-    });
+      previousEnd = end;
+    }
 
-    ctx.restore();
     return intervals;
+  }
+
+  function lyricTimelineEvents(ctx, units, pixelsPerSecond) {
+    if (!Array.isArray(units) || units.length === 0) return [];
+    ctx.save();
+    ctx.font = "900 23px sans-serif";
+    const events = units
+      .map((unit) => {
+        const start = Number(unit.start);
+        const end = Number(unit.end);
+        const text = String(unit.text || "").trim();
+        if (!text || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+        const textWidth = ctx.measureText(text).width;
+        const minimumWidth = clamp(textWidth + VOCAL_TIMELINE_TEXT_PADDING, 30, VOCAL_TIMELINE_MAX_TEXT_WIDTH);
+        return {
+          start,
+          end,
+          kind: "lyric",
+          minimumWidth,
+          duration: end - start,
+        };
+      })
+      .filter(Boolean);
+    ctx.restore();
+    return events;
+  }
+
+  function noteTimelineEvents(notes) {
+    if (!Array.isArray(notes) || notes.length === 0) return [];
+    return notes
+      .map((note) => {
+        const start = Number(note.start);
+        const end = Number(note.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+        return {
+          start,
+          end,
+          kind: "note",
+          duration: end - start,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function contourTimelineEvents(contour) {
+    if (!Array.isArray(contour) || contour.length < 2) return [];
+    const events = [];
+    let clusterStart = null;
+    let previousTime = null;
+    contour.forEach((point) => {
+      const time = Number(point.time);
+      const confidence = Number(point.confidence ?? 1);
+      if (!Number.isFinite(time) || confidence < REFERENCE_CONTOUR_MIN_CONFIDENCE) return;
+      if (clusterStart === null || previousTime === null) {
+        clusterStart = time;
+        previousTime = time;
+        return;
+      }
+      if (time - previousTime > VOCAL_TIMELINE_CONTOUR_GAP_SECONDS) {
+        if (previousTime > clusterStart) events.push({ start: clusterStart, end: previousTime, kind: "contour" });
+        clusterStart = time;
+      }
+      previousTime = time;
+    });
+    if (clusterStart !== null && previousTime !== null && previousTime > clusterStart) {
+      events.push({ start: clusterStart, end: previousTime, kind: "contour" });
+    }
+    return events;
+  }
+
+  function visualWidthForTimelineSegment(start, end, activeEvents, pixelsPerSecond) {
+    const duration = Math.max(VOCAL_TIMELINE_MIN_SEGMENT_SECONDS, end - start);
+    const baseWidth = duration * pixelsPerSecond;
+    if (!activeEvents.length) {
+      const rate = duration > 1.6 ? VOCAL_TIMELINE_LONG_SILENCE_RATE : VOCAL_TIMELINE_SHORT_SILENCE_RATE;
+      return Math.max(4, baseWidth * rate);
+    }
+
+    const hasLyric = activeEvents.some((event) => event.kind === "lyric");
+    const hasVocal = activeEvents.some((event) => event.kind === "note" || event.kind === "contour");
+    let rate = hasVocal ? VOCAL_TIMELINE_NOTE_RATE : 0.86;
+    let minimumWidth = 0;
+    activeEvents.forEach((event) => {
+      if (event.kind !== "lyric") return;
+      const overlap = Math.max(0, Math.min(end, event.end) - Math.max(start, event.start));
+      if (overlap <= 0) return;
+      const eventDuration = Math.max(VOCAL_TIMELINE_MIN_SEGMENT_SECONDS, event.duration || event.end - event.start);
+      minimumWidth = Math.max(minimumWidth, (Number(event.minimumWidth) || 0) * (overlap / eventDuration));
+    });
+    if (hasLyric && minimumWidth > 0) {
+      rate = Math.max(rate, Math.min(VOCAL_TIMELINE_MAX_DENSE_RATE, minimumWidth / Math.max(1, baseWidth)));
+    }
+    return Math.max(4, baseWidth * rate, minimumWidth);
+  }
+
+  function timelineSegmentKind(activeEvents) {
+    if (activeEvents.some((event) => event.kind === "lyric")) return "lyric";
+    if (activeEvents.some((event) => event.kind === "note")) return "note";
+    if (activeEvents.some((event) => event.kind === "contour")) return "contour";
+    return "silence";
+  }
+
+  function roundTimelineTime(value) {
+    return Math.round(Number(value) * 1000) / 1000;
   }
 
   function visualPositionAtTime(time, intervals, pixelsPerSecond) {
@@ -2556,7 +2701,8 @@
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x1, clipTop, Math.max(1, clamp(hitX, x1, x2) - x1), clipHeight);
+    const progress = lyricUnitPaintProgress(segment, songTime);
+    ctx.rect(textX, clipTop, Math.max(1, weightedLyricTextFillWidth(ctx, segment.text, progress)), clipHeight);
     ctx.clip();
     ctx.fillStyle = "rgba(18, 199, 156, 1)";
     ctx.fillText(segment.text, textX, textY);
@@ -2568,6 +2714,52 @@
     if (!cleanText) return [];
     const tokens = cleanText.match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu);
     return tokens?.length ? tokens : cleanText.split(/\s+/).filter(Boolean);
+  }
+
+  function lyricUnitPaintProgress(segment, songTime) {
+    const start = Number(segment?.start);
+    const end = Number(segment?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+    return clamp((songTime - start) / Math.max(0.04, end - start), 0, 1);
+  }
+
+  function weightedLyricTextFillWidth(ctx, text, progress) {
+    const cleanText = String(text || "");
+    const chars = Array.from(cleanText);
+    if (!chars.length) return 0;
+    const safeProgress = clamp(Number(progress), 0, 1);
+    if (safeProgress <= 0) return 0;
+    if (safeProgress >= 1) return ctx.measureText(cleanText).width;
+
+    const weights = chars.map((char) => lyricPaintCharacterWeight(char));
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    if (totalWeight <= 0) return ctx.measureText(cleanText).width * safeProgress;
+    const targetWeight = totalWeight * safeProgress;
+
+    let consumed = 0;
+    let width = 0;
+    for (let index = 0; index < chars.length; index++) {
+      const char = chars[index];
+      const weight = weights[index];
+      const charWidth = ctx.measureText(char).width;
+      if (consumed + weight >= targetWeight) {
+        const localProgress = clamp((targetWeight - consumed) / Math.max(0.001, weight), 0, 1);
+        return width + charWidth * localProgress;
+      }
+      consumed += weight;
+      width += charWidth;
+    }
+    return ctx.measureText(cleanText).width;
+  }
+
+  function lyricPaintCharacterWeight(char) {
+    if (/[\p{N}]/u.test(char)) return 0.8;
+    if (/[aeiouáàâãäåéèêëíìîïóòôõöúùûüýÿAEIOUÁÀÂÃÄÅÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÝ]/u.test(char)) {
+      return 2.8;
+    }
+    if (/[\p{L}]/u.test(char)) return 0.48;
+    if (/\s/u.test(char)) return 0.25;
+    return 0.35;
   }
 
   function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY, hitX) {
@@ -2626,7 +2818,8 @@
         if (!wordActive) return;
         ctx.save();
         ctx.beginPath();
-        ctx.rect(x, y - fontSize, Math.max(1, clamp(hitX, x, layout.endX) - x), fontSize * 2);
+        const progress = lyricUnitPaintProgress(word, songTime);
+        ctx.rect(x, y - fontSize, Math.max(1, weightedLyricTextFillWidth(ctx, word.text, progress)), fontSize * 2);
         ctx.clip();
         ctx.globalAlpha = 1;
         ctx.fillStyle = "rgba(18, 199, 156, 1)";
@@ -3235,7 +3428,7 @@
     const songTime = Number.isFinite(songTimeOverride) ? songTimeOverride : songPlaybackTime(now);
     const notes = songGuideNotes();
     const contour = songGuideContour();
-    const timeScale = lyricAwareRoadTimeScale(ctx, width, songTime, notes);
+    const timeScale = vocalRoadTimeScale(ctx, width, songTime, notes, contour);
     const { hitX, minTime, maxTime, xForTime } = timeScale;
     const range = songRoadMidiRange(songTime, minTime, maxTime);
     const span = Math.max(1, range.maxMidi - range.minMidi);
