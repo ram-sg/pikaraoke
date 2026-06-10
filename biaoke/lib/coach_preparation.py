@@ -6,6 +6,7 @@ import logging
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
@@ -38,6 +39,12 @@ DEMUCS_MODEL_ENV = "BIAOKE_COACH_DEMUCS_MODEL"
 STEMS_TIMEOUT_ENV = "BIAOKE_COACH_STEMS_TIMEOUT"
 TRANSCRIBE_TIMEOUT_ENV = "BIAOKE_COACH_TRANSCRIBE_TIMEOUT"
 TRANSCRIBE_MODEL_ENV = "BIAOKE_COACH_TRANSCRIBE_MODEL"
+DEEPSEEK_API_KEY_ENV = "DEEPSEEK_API_KEY"
+DEEPSEEK_BASE_URL_ENV = "DEEPSEEK_BASE_URL"
+DEEPSEEK_MODEL_ENV = "DEEPSEEK_MODEL"
+DEEPSEEK_TIMEOUT_ENV = "DEEPSEEK_TIMEOUT"
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
 PITCH_BANDS_CENTS = [25, 40, 60, 80, 100, 130, 160, 200, 250, 320]
 TIMING_BANDS_MS = [40, 70, 100, 140, 180, 230, 290, 360, 450, 600]
 LYRICS_DURATION_TOLERANCE_SECONDS = 12.0
@@ -53,6 +60,10 @@ VOCAL_FILTER_LINE_SECONDS_PER_WORD = 0.8
 VOCAL_FILTER_LINE_MIN_SECONDS = 2.6
 VOCAL_FILTER_MIN_TRANSCRIPT_LINE_COVERAGE = 0.45
 VOCAL_FILTER_VERSION = 3
+AI_REVIEW_MIN_CONFIDENCE = 0.35
+AI_REVIEW_MAX_LINES = 320
+AI_REVIEW_MAX_TRANSCRIPT_WORDS = 1200
+AI_REVIEW_MAX_NOTES = 700
 
 
 class CoachPreparationManager:
@@ -316,6 +327,56 @@ class CoachPreparationManager:
         )
         return {"track": self.get_track_with_assets(track_id), "job": job}
 
+    def review_track_with_ai(self, track_id: int) -> dict[str, Any] | None:
+        """Use DeepSeek to review and correct a generated coach guide."""
+        track = self.get_track_with_assets(track_id)
+        if not track:
+            return None
+        assets = track.get("assets") or {}
+        guide_path = Path(str(assets.get("guide_path") or ""))
+        if not guide_path.is_file():
+            raise ValueError("Guia do Coach nao encontrado para revisar.")
+
+        job = self._db.create_coach_job(
+            track_id,
+            stage="ai_review",
+            status="running",
+            progress=5,
+        )
+        try:
+            with guide_path.open("r", encoding="utf-8") as handle:
+                guide = json.load(handle)
+            review = _review_coach_guide_with_deepseek(track, guide)
+            revised_guide = _apply_ai_review_to_coach_guide(guide, review)
+            _write_json_with_backup(guide_path, revised_guide)
+        except (OSError, ValueError, requests.RequestException, json.JSONDecodeError) as exc:
+            self._db.update_coach_job(
+                job["id"],
+                status="failed",
+                progress=0,
+                error=str(exc),
+            )
+            raise ValueError(f"Revisao por IA falhou: {exc}") from exc
+
+        quality_status = (revised_guide.get("quality") or {}).get("status") or "unknown"
+        track_status = READY_STATUS if quality_status == "ready" else NEEDS_REVIEW_STATUS
+        self._db.update_coach_track(
+            track_id,
+            status=track_status,
+            quality_status=quality_status,
+        )
+        finished_job = self._db.update_coach_job(job["id"], status="complete", progress=100)
+        self._events.emit(
+            "notification",
+            f"Revisao por IA concluida: {track.get('display_title') or track_id}",
+            "success" if track_status == READY_STATUS else "warning",
+        )
+        return {
+            "track": self.get_track_with_assets(track_id),
+            "job": finished_job,
+            "review": (revised_guide.get("quality") or {}).get("ai_review") or {},
+        }
+
     def delete_track(self, track_id: int, *, delete_files: bool = True) -> dict[str, Any] | None:
         """Delete a coach track and, when safe, its generated media files."""
         track = self.get_track_with_assets(track_id)
@@ -480,6 +541,7 @@ def _coach_file_paths(track: dict[str, Any]) -> list[Path]:
         assets.get("instrumental_audio_path"),
         assets.get("vocal_reference_path"),
         assets.get("guide_path"),
+        f"{assets.get('guide_path')}.before-ai-review" if assets.get("guide_path") else None,
         assets.get("lyrics_path"),
     ]
     unique_paths = []
@@ -571,6 +633,333 @@ def _write_coach_guide(
         handle.write("\n")
     os.replace(tmp_path, path)
     return path
+
+
+def _review_coach_guide_with_deepseek(track: dict[str, Any], guide: dict[str, Any]) -> dict[str, Any]:
+    api_key = os.environ.get(DEEPSEEK_API_KEY_ENV, "").strip()
+    if not api_key:
+        raise ValueError(f"{DEEPSEEK_API_KEY_ENV} nao configurada.")
+
+    model = os.environ.get(DEEPSEEK_MODEL_ENV, DEFAULT_DEEPSEEK_MODEL).strip() or DEFAULT_DEEPSEEK_MODEL
+    base_url = os.environ.get(DEEPSEEK_BASE_URL_ENV, DEFAULT_DEEPSEEK_BASE_URL).strip() or DEFAULT_DEEPSEEK_BASE_URL
+    review_input = _coach_ai_review_input(track, guide)
+    response = requests.post(
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You review karaoke vocal-coach guide data. Return only valid JSON. "
+                        "Use only the provided lyrics, transcript words, melody timing and metadata. "
+                        "Do not add song lyrics from memory or external knowledge."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(review_input, ensure_ascii=False),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "thinking": {"type": "disabled"},
+            "temperature": 0.1,
+            "max_tokens": 12000,
+            "stream": False,
+        },
+        timeout=_deepseek_timeout_seconds(),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    content = (
+        ((payload.get("choices") or [{}])[0].get("message") or {}).get("content")
+        if isinstance(payload, dict)
+        else None
+    )
+    if not content:
+        raise ValueError("DeepSeek nao retornou conteudo de revisao.")
+    review = _parse_ai_review_json(content)
+    review["_provider"] = "deepseek"
+    review["_model"] = payload.get("model") or model
+    if payload.get("usage"):
+        review["_usage"] = payload.get("usage")
+    return review
+
+
+def _coach_ai_review_input(track: dict[str, Any], guide: dict[str, Any]) -> dict[str, Any]:
+    lyrics = guide.get("lyrics") if isinstance(guide.get("lyrics"), dict) else {}
+    melody = guide.get("melody") if isinstance(guide.get("melody"), dict) else {}
+    transcript = guide.get("transcript") if isinstance(guide.get("transcript"), dict) else {}
+    return {
+        "task": (
+            "Return JSON with keys action, confidence, summary, issues and lines. "
+            "If existing lyrics are present, keep their wording but correct/drop bad timings. "
+            "If lyrics are missing, group transcript words into readable line-timed captions. "
+            "Every line must have start, end and text. Times are seconds. Lines must be monotonic."
+        ),
+        "output_schema": {
+            "action": "apply or no_change",
+            "confidence": "number from 0 to 1",
+            "summary": "short explanation",
+            "issues": ["short issue codes or notes"],
+            "lines": [{"start": 0.0, "end": 1.0, "text": "visible lyric/caption line"}],
+        },
+        "rules": [
+            "Never invent missing lyrics from memory.",
+            "Prefer transcript word timings over line timings when they conflict.",
+            "Drop lines that clearly extend beyond the song duration or video/audio content.",
+            "Keep line text short enough for karaoke display.",
+            "Do not change pitch notes or MIDI values.",
+        ],
+        "track": {
+            "id": track.get("id"),
+            "display_title": track.get("display_title"),
+            "source_type": track.get("source_type"),
+            "source_id": track.get("source_id"),
+        },
+        "quality": guide.get("quality") or {},
+        "duration_seconds": _guide_duration_seconds(melody) or None,
+        "lyrics": {
+            "status": lyrics.get("status"),
+            "source": lyrics.get("source"),
+            "source_format": lyrics.get("source_format"),
+            "has_karaoke_timing": bool(lyrics.get("has_karaoke_timing")),
+            "line_count": len(lyrics.get("lines") or []),
+            "lines": _compact_lyric_lines(lyrics.get("lines") or []),
+        },
+        "transcript": {
+            "status": transcript.get("status"),
+            "engine": transcript.get("engine"),
+            "language": transcript.get("language"),
+            "words": _compact_transcript_words(transcript.get("words") or []),
+        },
+        "melody": {
+            "duration_seconds": melody.get("duration_seconds"),
+            "note_count": len(melody.get("notes") or []),
+            "notes": _compact_melody_notes(melody.get("notes") or []),
+            "vocal_filter": melody.get("vocal_filter") or {},
+        },
+    }
+
+
+def _compact_lyric_lines(lines: list[Any]) -> list[dict[str, Any]]:
+    compact = []
+    for line in lines[:AI_REVIEW_MAX_LINES]:
+        if not isinstance(line, dict):
+            continue
+        start = _safe_float(line.get("start"))
+        end = _safe_float(line.get("end"))
+        text = _clean_ai_text(line.get("text"))
+        if start is None or end is None or not text:
+            continue
+        compact.append({"start": round(start, 3), "end": round(end, 3), "text": text})
+    return compact
+
+
+def _compact_transcript_words(words: list[Any]) -> list[dict[str, Any]]:
+    compact = []
+    for word in words[:AI_REVIEW_MAX_TRANSCRIPT_WORDS]:
+        if not isinstance(word, dict):
+            continue
+        start = _safe_float(word.get("start"))
+        end = _safe_float(word.get("end"))
+        text = _clean_ai_text(word.get("word") or word.get("text"))
+        if start is None or end is None or not text:
+            continue
+        item = {"start": round(start, 3), "end": round(end, 3), "text": text}
+        confidence = _safe_float(word.get("probability") or word.get("confidence"))
+        if confidence is not None:
+            item["confidence"] = round(confidence, 4)
+        compact.append(item)
+    return compact
+
+
+def _compact_melody_notes(notes: list[Any]) -> list[dict[str, Any]]:
+    compact = []
+    for note in notes[:AI_REVIEW_MAX_NOTES]:
+        if not isinstance(note, dict):
+            continue
+        start = _safe_float(note.get("start"))
+        end = _safe_float(note.get("end"))
+        midi = _safe_float(note.get("midi"))
+        if start is None or end is None or midi is None:
+            continue
+        item = {"start": round(start, 3), "end": round(end, 3), "midi": round(midi, 3)}
+        confidence = _safe_float(note.get("confidence"))
+        if confidence is not None:
+            item["confidence"] = round(confidence, 4)
+        compact.append(item)
+    return compact
+
+
+def _parse_ai_review_json(content: str) -> dict[str, Any]:
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        parsed = json.loads(text[start : end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("DeepSeek retornou JSON invalido.")
+    return parsed
+
+
+def _apply_ai_review_to_coach_guide(guide: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    melody = guide.get("melody") if isinstance(guide.get("melody"), dict) else {}
+    transcript = guide.get("transcript") if isinstance(guide.get("transcript"), dict) else {}
+    stems = guide.get("stems") if isinstance(guide.get("stems"), dict) else None
+    confidence = _safe_float(review.get("confidence"))
+    if confidence is None:
+        confidence = 0.0
+    if confidence < AI_REVIEW_MIN_CONFIDENCE:
+        raise ValueError("IA retornou confianca baixa para aplicar a revisao.")
+    if str(review.get("action") or "apply").strip().casefold() == "no_change":
+        raise ValueError("IA nao encontrou uma revisao aplicavel.")
+
+    revised_lines = _validated_ai_review_lines(
+        review.get("lines") or (review.get("lyrics") or {}).get("lines"),
+        duration_seconds=_guide_duration_seconds(melody),
+    )
+    if not revised_lines:
+        raise ValueError("IA nao retornou linhas validas para a legenda.")
+
+    original_lyrics = guide.get("lyrics") if isinstance(guide.get("lyrics"), dict) else {}
+    revised_lyrics = dict(original_lyrics)
+    revised_lyrics.update(
+        {
+            "status": "ready",
+            "source": _ai_review_source_name(original_lyrics.get("source")),
+            "source_format": "ai_review_lines",
+            "confidence": round(max(float(original_lyrics.get("confidence") or 0.0), confidence), 3),
+            "has_karaoke_timing": False,
+            "line_count": len(revised_lines),
+            "lines": revised_lines,
+        }
+    )
+    revised_lyrics.pop("alignment", None)
+    revised_lyrics["ai_review"] = _ai_review_metadata(review, len(revised_lines))
+
+    revised_lyrics = with_vocal_activity_alignment(revised_lyrics, melody)
+    word_alignment = build_word_alignment_from_transcript(
+        revised_lyrics,
+        transcript.get("words") if isinstance(transcript, dict) else [],
+        method="deepseek_review_transcript_alignment",
+    )
+    if word_alignment:
+        revised_lyrics["alignment"] = word_alignment
+
+    revised_guide = dict(guide)
+    revised_guide["lyrics"] = revised_lyrics
+    revised_guide["tasks"] = _build_pitch_tasks({"lyrics": revised_lyrics}, melody)
+    quality_status = _coach_quality_status({"lyrics": revised_lyrics}, melody, stems)
+    revised_guide["quality"] = {
+        "status": quality_status,
+        "lyrics_ready": revised_lyrics.get("status") == "ready",
+        "melody_ready": bool(melody.get("notes")),
+        "vocal_stem_ready": bool(stems and stems.get("vocals_path")),
+        "messages": _coach_quality_messages({"lyrics": revised_lyrics}, melody, stems),
+        "ai_review": _ai_review_metadata(review, len(revised_lines)),
+    }
+    return revised_guide
+
+
+def _validated_ai_review_lines(raw_lines: Any, *, duration_seconds: float = 0.0) -> list[dict[str, Any]]:
+    if not isinstance(raw_lines, list):
+        return []
+    max_end = duration_seconds + 1.5 if duration_seconds > 0 else None
+    lines = []
+    previous_end = 0.0
+    for raw_line in raw_lines[:AI_REVIEW_MAX_LINES]:
+        if not isinstance(raw_line, dict):
+            continue
+        start = _safe_float(raw_line.get("start"))
+        end = _safe_float(raw_line.get("end"))
+        text = _clean_ai_text(raw_line.get("text"))
+        if start is None or end is None or not text:
+            continue
+        if max_end is not None and start > max_end:
+            continue
+        start = max(0.0, start)
+        if max_end is not None:
+            end = min(end, max_end)
+        if start < previous_end:
+            start = previous_end
+        if end <= start + 0.08:
+            continue
+        line = {
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": text,
+            "has_karaoke_timing": False,
+            "segments": _segments_for_ai_line(text, start, end),
+        }
+        lines.append(line)
+        previous_end = float(line["end"])
+    return lines
+
+
+def _segments_for_ai_line(text: str, start: float, end: float) -> list[dict[str, Any]]:
+    pieces = re.findall(r"\S+\s*", text) or [text]
+    total_weight = sum(max(1, len(piece.strip())) for piece in pieces)
+    duration = max(0.05, end - start)
+    cursor = start
+    segments = []
+    for index, piece in enumerate(pieces):
+        is_last = index == len(pieces) - 1
+        weight = max(1, len(piece.strip()))
+        segment_duration = end - cursor if is_last else duration * (weight / total_weight)
+        segment_end = min(end, cursor + max(0.03, segment_duration))
+        segments.append({"text": piece, "start": round(cursor, 3), "end": round(segment_end, 3)})
+        cursor = segment_end
+    return segments
+
+
+def _clean_ai_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:240]
+
+
+def _ai_review_source_name(original_source: Any) -> str:
+    source = str(original_source or "").strip()
+    if not source or source == "deepseek_ai_review":
+        return "deepseek_ai_review"
+    if "deepseek_ai_review" in source:
+        return source
+    return f"{source}+deepseek_ai_review"
+
+
+def _ai_review_metadata(review: dict[str, Any], line_count: int) -> dict[str, Any]:
+    metadata = {
+        "provider": review.get("_provider") or "deepseek",
+        "model": review.get("_model") or os.environ.get(DEEPSEEK_MODEL_ENV, DEFAULT_DEEPSEEK_MODEL),
+        "confidence": round(max(0.0, min(1.0, float(review.get("confidence") or 0.0))), 3),
+        "summary": _clean_ai_text(review.get("summary")),
+        "issues": [str(issue)[:120] for issue in (review.get("issues") or []) if str(issue).strip()][:12],
+        "line_count": line_count,
+    }
+    if review.get("_usage"):
+        metadata["usage"] = review.get("_usage")
+    return metadata
+
+
+def _write_json_with_backup(path: Path, payload: dict[str, Any]) -> None:
+    backup_path = path.with_name(path.name + ".before-ai-review")
+    if path.is_file() and not backup_path.exists():
+        shutil.copy2(path, backup_path)
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp_path, path)
 
 
 def _filter_melody_to_vocal_windows(
@@ -1062,6 +1451,14 @@ def _transcribe_timeout_seconds() -> int:
         return max(300, min(3600, int(raw_value or 1200)))
     except ValueError:
         return 1200
+
+
+def _deepseek_timeout_seconds() -> int:
+    raw_value = os.environ.get(DEEPSEEK_TIMEOUT_ENV)
+    try:
+        return max(15, min(300, int(raw_value or 90)))
+    except ValueError:
+        return 90
 
 
 def _transcribe_coach_vocals(media_path: Path) -> dict[str, Any] | None:

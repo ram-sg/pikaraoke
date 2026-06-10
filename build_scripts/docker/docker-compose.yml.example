@@ -25,6 +25,11 @@ services:
       BIAOKE_YTDL_ARGS: ${BIAOKE_YTDL_ARGS:-}
       # Optional GPU scoring service URL. Leave empty to use the built-in CPU fallback.
       BIAOKE_SCORING_SERVICE_URL: ${BIAOKE_SCORING_SERVICE_URL:-http://scoring:8765/analyze}
+      # Optional AI guide review. Uses DeepSeek V4 Flash by default.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_TIMEOUT: ${DEEPSEEK_TIMEOUT:-90}
 
     # --- COMMAND CONFIGURATION ---
     # -u: Required for the QR code to work on other devices.

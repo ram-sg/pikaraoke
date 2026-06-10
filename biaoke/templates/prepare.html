@@ -175,6 +175,35 @@
       });
     });
 
+    $(".review-ai-coach-button").on("click", function () {
+      var button = $(this);
+      var originalText = button.text();
+      button.addClass("is-loading").attr("disabled", true);
+      $.ajax({
+        url: "{{ url_for('prepare.review_ai_prepared_track') }}",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          track_id: Number(button.data("track-id")),
+        }),
+        success: function (data) {
+          button.removeClass("is-loading").addClass("is-success").text("Revisada");
+          showNotification(data.message || "Revisao por IA concluida", "is-success");
+          setTimeout(function () {
+            window.location.reload();
+          }, 900);
+        },
+        error: function (xhr) {
+          var data = xhr.responseJSON || {};
+          button.removeClass("is-loading").addClass("is-danger").text("Erro");
+          showNotification(data.message || "Nao foi possivel revisar com IA", "is-danger", 5000);
+          setTimeout(function () {
+            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
+          }, 2500);
+        },
+      });
+    });
+
     $(".delete-coach-button").on("click", function () {
       if (!window.confirm("Remover esta musica preparada e os arquivos gerados?")) return;
       var button = $(this);
@@ -313,6 +342,9 @@
         </div>
         {% elif track.status == 'needs_review' %}
         <div class="prepare-actions">
+          <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
+            Corrigir com IA
+          </button>
           <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
             Reprocessar
           </button>

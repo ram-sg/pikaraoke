@@ -120,6 +120,20 @@ def reanalyze_prepared_track(form):
     return jsonify({"status": "ok", **result})
 
 
+@prepare_bp.route("/prepare/review-ai", methods=["POST"])
+@prepare_bp.arguments(CoachTrackActionBody, location="json")
+def review_ai_prepared_track(form):
+    """Review and correct a generated coach guide with AI."""
+    k = get_karaoke_instance()
+    try:
+        result = k.coach_preparation.review_track_with_ai(int(form["track_id"]))
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    if not result:
+        return jsonify({"status": "error", "message": "Track preparado nao encontrado."}), 404
+    return jsonify({"status": "ok", "message": "Revisao por IA concluida.", **result})
+
+
 @prepare_bp.route("/prepare/delete", methods=["POST"])
 @prepare_bp.arguments(CoachTrackActionBody, location="json")
 def delete_prepared_track(form):

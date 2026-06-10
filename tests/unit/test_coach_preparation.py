@@ -674,6 +674,101 @@ def test_pending_analysis_marks_needs_review_without_vocal_stem(tmp_path):
     db.close()
 
 
+def test_review_track_with_ai_applies_revised_lyrics_and_marks_ready(tmp_path):
+    media_path = tmp_path / "Artist - Song.mp4"
+    media_path.write_bytes(b"fake media")
+    guide_path = tmp_path / "Artist - Song.biaoke-coach.json"
+    guide_path.write_text(
+        json.dumps(
+            {
+                "schema": "biaoke.coach_guide",
+                "version": 1,
+                "stems": {
+                    "status": "ready",
+                    "vocals_path": str(tmp_path / "vocals.wav"),
+                    "instrumental_path": str(tmp_path / "instrumental.wav"),
+                },
+                "transcript": {
+                    "status": "ready",
+                    "words": [
+                        {"word": "hello", "start": 1.0, "end": 1.4, "probability": 0.95},
+                        {"word": "again", "start": 1.45, "end": 2.0, "probability": 0.94},
+                    ],
+                },
+                "lyrics": {"status": "missing", "lines": []},
+                "melody": {
+                    "status": "ready",
+                    "duration_seconds": 12,
+                    "notes": [{"start": 1.0, "end": 2.0, "midi": 60, "confidence": 0.9}],
+                },
+                "quality": {
+                    "status": "needs_review",
+                    "messages": ["needs_lyrics"],
+                    "lyrics_ready": False,
+                    "melody_ready": True,
+                    "vocal_stem_ready": True,
+                },
+                "tasks": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    track = db.upsert_coach_track(
+        source_type="local",
+        source_url=str(media_path),
+        source_id=str(media_path),
+        display_title="Artist - Song",
+        file_path=str(media_path),
+        status="needs_review",
+    )
+    db.set_coach_assets(
+        track["id"],
+        original_audio_path=str(media_path),
+        guide_path=str(guide_path),
+        vocal_reference_path=str(tmp_path / "vocals.wav"),
+        instrumental_audio_path=str(tmp_path / "instrumental.wav"),
+    )
+
+    with patch(
+        "biaoke.lib.coach_preparation._review_coach_guide_with_deepseek",
+        return_value={
+            "_provider": "deepseek",
+            "_model": "deepseek-v4-flash",
+            "action": "apply",
+            "confidence": 0.86,
+            "summary": "Built line captions from transcript words.",
+            "issues": ["needs_lyrics"],
+            "lines": [{"start": 1.0, "end": 2.0, "text": "hello again"}],
+        },
+    ):
+        result = manager.review_track_with_ai(track["id"])
+
+    updated_track = db.get_coach_track(track["id"])
+    jobs = db.list_coach_jobs(track["id"], limit=1)
+    revised = json.loads(guide_path.read_text(encoding="utf-8"))
+
+    assert result is not None
+    assert updated_track["status"] == "ready"
+    assert updated_track["quality_status"] == "ready"
+    assert jobs[0]["stage"] == "ai_review"
+    assert jobs[0]["status"] == "complete"
+    assert revised["lyrics"]["status"] == "ready"
+    assert revised["lyrics"]["lines"][0]["text"] == "hello again"
+    assert revised["lyrics"]["alignment"]["granularity"] == "word"
+    assert revised["quality"]["status"] == "ready"
+    assert revised["quality"]["ai_review"]["model"] == "deepseek-v4-flash"
+    assert revised["tasks"][0]["text"] == "hello again"
+    assert guide_path.with_name(guide_path.name + ".before-ai-review").exists()
+    db.close()
+
+
 def test_playable_asset_prefers_instrumental_and_loads_guide_from_stem(tmp_path):
     original_path = tmp_path / "Artist - Song.mp3"
     instrumental_path = tmp_path / ".biaoke-stems" / "Artist - Song.instrumental.wav"

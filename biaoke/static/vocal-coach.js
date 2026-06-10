@@ -1421,7 +1421,7 @@
     const now = performance.now();
     const video = getVideoPlayer();
     const duration = Number(state.nowPlaying.now_playing_duration || video.duration || 0);
-    const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const current = songPlaybackTime(now);
     setText("coach-current", formatDuration(current));
     if (duration > 0) {
       setText("coach-duration", `/${formatDuration(duration)}`);
@@ -1431,7 +1431,7 @@
     }
     updateLyrics(current);
     syncVocalReferenceToMain(false);
-    drawStageSongRoad(now, currentTarget(now), state.latestPitchMidi);
+    drawStageSongRoad(now, currentTarget(now), state.latestPitchMidi, current);
     state.playbackRafId = requestAnimationFrame(updatePlaybackUi);
   }
 
@@ -3172,16 +3172,17 @@
     ctx.restore();
   }
 
-  function drawStageSongRoad(now, target = null, pitchMidi = null) {
+  function drawStageSongRoad(now, target = null, pitchMidi = null, songTimeOverride = null) {
     const canvasState = resizeSongRoadCanvas();
     if (!canvasState) return;
     const { ctx, width, height } = canvasState;
     ctx.clearRect(0, 0, width, height);
 
-    const songTime = songPlaybackTime(now);
+    const songTime = Number.isFinite(songTimeOverride) ? songTimeOverride : songPlaybackTime(now);
     const notes = songGuideNotes();
     const contour = songGuideContour();
-    const timeScale = lyricAwareRoadTimeScale(ctx, width, songTime, notes);
+    // Musical timing must stay linear: text width can affect readability, but not the clock.
+    const timeScale = fixedRoadTimeScale(width, songTime, notes);
     const { hitX, minTime, maxTime, xForTime } = timeScale;
     const range = songRoadMidiRange(songTime, minTime, maxTime);
     const span = Math.max(1, range.maxMidi - range.minMidi);
