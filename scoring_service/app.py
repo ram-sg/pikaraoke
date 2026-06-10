@@ -58,6 +58,9 @@ class TranscriptRequest(BaseModel):
     input_path: str
     model: str = "medium"
     language: str | None = None
+    vad_filter: bool = True
+    initial_prompt: str | None = None
+    beam_size: int = 5
 
 
 class LyricAlignmentLine(BaseModel):
@@ -207,9 +210,11 @@ def transcribe(request: TranscriptRequest):
         segments, info = model.transcribe(
             str(input_path),
             language=request.language or None,
-            beam_size=5,
-            vad_filter=True,
+            beam_size=_safe_beam_size(request.beam_size),
+            vad_filter=bool(request.vad_filter),
             word_timestamps=True,
+            condition_on_previous_text=True,
+            initial_prompt=_safe_transcription_prompt(request.initial_prompt),
         )
         words = []
         for segment in segments:
@@ -233,6 +238,8 @@ def transcribe(request: TranscriptRequest):
         "engine": "faster-whisper",
         "model": model_name,
         "device": device,
+        "vad_filter": bool(request.vad_filter),
+        "prompted": bool(_safe_transcription_prompt(request.initial_prompt)),
         "language": getattr(info, "language", request.language),
         "language_probability": round(float(getattr(info, "language_probability", 0) or 0), 4),
         "words": words,
@@ -324,6 +331,21 @@ def _safe_transcription_model(model: str) -> str:
     model = (model or "medium").strip()
     allowed = {"tiny", "base", "small", "medium", "large-v2", "large-v3", "distil-large-v3"}
     return model if model in allowed else "medium"
+
+
+def _safe_beam_size(value: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 5
+    return max(1, min(10, parsed))
+
+
+def _safe_transcription_prompt(value: str | None) -> str | None:
+    prompt = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not prompt:
+        return None
+    return prompt[:2400]
 
 
 def _safe_alignment_model(model: str) -> str:

@@ -5,9 +5,11 @@ import pytest
 
 from biaoke.lib.coach_preparation import (
     CoachPreparationManager,
+    _filter_melody_to_vocal_windows,
     _lyrics_lines_for_forced_alignment,
     _review_coach_guide_with_ai,
     _review_coach_guide_with_deepseek,
+    _transcribe_and_align_coach_vocals,
     _write_coach_guide,
 )
 from biaoke.lib.events import EventSystem
@@ -518,6 +520,98 @@ def test_pending_analysis_uses_line_lyrics_when_transcript_misses_repeated_chant
     assert coach_guide["melody"]["vocal_filter"]["source"] == "transcript_words+line_lyrics"
     assert coach_guide["melody"]["vocal_filter"]["removed_notes"] == 1
     db.close()
+
+
+def test_filter_preserves_first_vocal_stem_preface_cluster():
+    lyrics = {
+        "status": "ready",
+        "has_karaoke_timing": False,
+        "lines": [
+            {"start": 37.53, "end": 55.68, "text": "I'm the man in the box buried in my shit"},
+            {"start": 55.68, "end": 73.33, "text": "Won't you come and save me"},
+        ],
+    }
+    melody = {
+        "status": "ready",
+        "notes": [
+            {"start": 10.0, "end": 11.0, "midi": 64, "confidence": 0.92},
+            {"start": 30.15, "end": 31.8, "midi": 58, "confidence": 0.9},
+            {"start": 32.0, "end": 35.2, "midi": 60, "confidence": 0.89},
+            {"start": 39.2, "end": 40.6, "midi": 56, "confidence": 0.9},
+        ],
+        "contour": [
+            {"time": 10.2, "midi": 64, "confidence": 0.92},
+            {"time": 30.4, "midi": 58, "confidence": 0.9},
+            {"time": 34.8, "midi": 60, "confidence": 0.89},
+            {"time": 39.8, "midi": 56, "confidence": 0.9},
+        ],
+    }
+
+    filtered = _filter_melody_to_vocal_windows(
+        melody,
+        lyrics,
+        None,
+        preserve_vocal_stem_preface=True,
+    )
+
+    assert [note["start"] for note in filtered["notes"]] == [30.15, 32.0, 39.2]
+    assert [point["time"] for point in filtered["contour"]] == [30.4, 34.8, 39.8]
+    assert filtered["vocal_filter"]["source"] == "line_lyrics"
+    assert filtered["vocal_filter"]["preface_first_window_extended"] is True
+    assert filtered["vocal_filter"]["removed_notes"] == 1
+
+
+def test_transcription_retries_without_vad_when_prompt_improves_alignment(tmp_path):
+    lyrics = {
+        "status": "ready",
+        "lines": [
+            {"start": 37.53, "end": 55.68, "text": "I'm the man in the box buried in my shit"},
+            {"start": 55.68, "end": 73.33, "text": "Won't you come and save me"},
+        ],
+    }
+    weak_transcript = {
+        "status": "ready",
+        "engine": "faster-whisper",
+        "words": [{"word": "unrelated", "start": 61.0, "end": 61.4, "probability": 0.2}],
+    }
+    prompted_transcript = {
+        "status": "ready",
+        "engine": "faster-whisper",
+        "mode": "lyrics_prompt_no_vad",
+        "words": [
+            {"word": "I'm", "start": 30.5, "end": 31.9, "probability": 0.8},
+            {"word": "the", "start": 31.9, "end": 32.1, "probability": 0.8},
+            {"word": "man", "start": 32.1, "end": 33.7, "probability": 0.95},
+            {"word": "in", "start": 33.7, "end": 34.1, "probability": 0.95},
+            {"word": "the", "start": 34.1, "end": 34.5, "probability": 0.95},
+            {"word": "box", "start": 34.5, "end": 37.5, "probability": 0.9},
+            {"word": "buried", "start": 40.4, "end": 40.9, "probability": 0.7},
+            {"word": "in", "start": 40.9, "end": 43.2, "probability": 0.9},
+            {"word": "my", "start": 43.2, "end": 44.0, "probability": 0.9},
+            {"word": "shit", "start": 44.0, "end": 44.4, "probability": 0.9},
+            {"word": "Won't", "start": 50.0, "end": 51.4, "probability": 0.7},
+            {"word": "you", "start": 51.4, "end": 52.8, "probability": 0.9},
+            {"word": "come", "start": 52.8, "end": 55.0, "probability": 0.8},
+            {"word": "and", "start": 55.0, "end": 56.7, "probability": 0.9},
+            {"word": "save", "start": 56.7, "end": 57.4, "probability": 0.9},
+            {"word": "me", "start": 57.4, "end": 58.5, "probability": 0.95},
+        ],
+    }
+
+    with patch(
+        "biaoke.lib.coach_preparation._transcribe_coach_vocals",
+        side_effect=[weak_transcript, prompted_transcript],
+    ) as transcribe_mock:
+        transcript, alignment = _transcribe_and_align_coach_vocals(tmp_path / "vocals.wav", lyrics)
+
+    assert transcript["mode"] == "lyrics_prompt_no_vad"
+    assert transcript["selection_reason"] == "lyrics_prompt_no_vad_improved_alignment"
+    assert transcript["fallback_of"]["word_count"] == 1
+    assert alignment["method"] == "faster_whisper_lyrics_prompt_no_vad_alignment"
+    assert alignment["confidence"]["overall"] > 0.9
+    assert alignment["paint_units"][0]["start"] == 30.5
+    assert transcribe_mock.call_args_list[1].kwargs["vad_filter"] is False
+    assert "man in the box" in transcribe_mock.call_args_list[1].kwargs["initial_prompt"]
 
 
 def test_reanalyze_track_queues_fresh_analysis(tmp_path):

@@ -71,7 +71,11 @@ VOCAL_FILTER_LINE_BASE_SECONDS = 1.0
 VOCAL_FILTER_LINE_SECONDS_PER_WORD = 0.8
 VOCAL_FILTER_LINE_MIN_SECONDS = 2.6
 VOCAL_FILTER_MIN_TRANSCRIPT_LINE_COVERAGE = 0.45
-VOCAL_FILTER_VERSION = 3
+VOCAL_FILTER_PREFACE_MAX_GAP_SECONDS = 4.0
+VOCAL_FILTER_PREFACE_MAX_NOTE_GAP_SECONDS = 0.65
+VOCAL_FILTER_PREFACE_MIN_SECONDS = 0.45
+VOCAL_FILTER_PREFACE_MIN_CONFIDENCE = 0.7
+VOCAL_FILTER_VERSION = 4
 AI_REVIEW_MIN_CONFIDENCE = 0.35
 AI_REVIEW_EXISTING_LYRICS_MIN_TEXT_MATCH = 0.85
 AI_REVIEW_MAX_LINES = 320
@@ -81,6 +85,8 @@ AI_REVIEW_MAX_NOTES = 700
 FORCED_ALIGNMENT_MIN_CONFIDENCE = 0.18
 FORCED_ALIGNMENT_MIN_COVERAGE = 0.35
 FORCED_ALIGNMENT_LINE_MIN_TRANSCRIPT_COVERAGE = 0.32
+TRANSCRIPT_RETRY_MIN_ALIGNMENT_COVERAGE = 0.68
+TRANSCRIPTION_PROMPT_MAX_CHARS = 2200
 
 
 class CoachPreparationManager:
@@ -531,7 +537,10 @@ class CoachPreparationManager:
         )
 
         try:
+            existing_lyrics = _load_existing_coach_lyrics(media_path)
             lyrics_guide = write_song_guide(media_path)
+            if _lyrics_ready(existing_lyrics) and not _lyrics_ready(lyrics_guide.get("lyrics")):
+                lyrics_guide = {**lyrics_guide, "lyrics": existing_lyrics}
             self._db.update_coach_job(job_id, stage="separate_stems", progress=30)
             stems = _separate_coach_stems(media_path)
             if stems:
@@ -544,16 +553,15 @@ class CoachPreparationManager:
             self._db.update_coach_job(job_id, stage="extract_melody", progress=55)
             melody_guide = _extract_coach_melody(melody_source_path)
             self._db.update_coach_job(job_id, stage="align_lyrics", progress=72)
-            transcript = _transcribe_coach_vocals(melody_source_path)
+            transcript, transcript_alignment = _transcribe_and_align_coach_vocals(
+                melody_source_path,
+                lyrics_guide.get("lyrics") or {},
+            )
             melody_guide = _filter_melody_to_vocal_windows(
                 melody_guide,
                 lyrics_guide.get("lyrics") or {},
                 transcript,
-            )
-            transcript_alignment = build_word_alignment_from_transcript(
-                lyrics_guide.get("lyrics") or {},
-                transcript.get("words") if isinstance(transcript, dict) else [],
-                method="faster_whisper_word_alignment",
+                preserve_vocal_stem_preface=bool(stems and stems.get("vocals_path")),
             )
             forced_alignment = _align_coach_lyrics(
                 melody_source_path,
@@ -707,10 +715,12 @@ def _write_coach_guide(
     forced_alignment: dict[str, Any] | None = None,
 ) -> Path:
     path = _coach_guide_path(media_path)
+    _backup_existing_coach_guide(path)
     melody_guide = _filter_melody_to_vocal_windows(
         melody_guide,
         lyrics_guide.get("lyrics") or {},
         transcript,
+        preserve_vocal_stem_preface=bool(stems and stems.get("vocals_path")),
     )
     lyrics = with_vocal_activity_alignment(lyrics_guide.get("lyrics") or {}, melody_guide)
     if _is_usable_forced_alignment(forced_alignment):
@@ -756,6 +766,38 @@ def _write_coach_guide(
         handle.write("\n")
     os.replace(tmp_path, path)
     return path
+
+
+def _backup_existing_coach_guide(path: Path) -> None:
+    backup_path = path.with_name(path.name + ".before-analysis")
+    if not path.is_file() or backup_path.exists():
+        return
+    try:
+        shutil.copy2(path, backup_path)
+    except OSError as exc:
+        logging.warning("Failed to back up coach guide %s: %s", path, exc)
+
+
+def _load_existing_coach_lyrics(media_path: str | Path) -> dict[str, Any] | None:
+    path = _coach_guide_path(media_path)
+    if not path.is_file():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            guide = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    lyrics = guide.get("lyrics") if isinstance(guide, dict) else None
+    return lyrics if _lyrics_ready(lyrics) else None
+
+
+def _lyrics_ready(lyrics: Any) -> bool:
+    return (
+        isinstance(lyrics, dict)
+        and lyrics.get("status") == "ready"
+        and isinstance(lyrics.get("lines"), list)
+        and len(lyrics.get("lines") or []) > 0
+    )
 
 
 def _is_usable_forced_alignment(alignment: dict[str, Any] | None) -> bool:
@@ -1591,6 +1633,8 @@ def _filter_melody_to_vocal_windows(
     melody_guide: dict[str, Any],
     lyrics: dict[str, Any] | None,
     transcript: dict[str, Any] | None,
+    *,
+    preserve_vocal_stem_preface: bool = False,
 ) -> dict[str, Any]:
     """Remove pitch guide material that is not supported by vocal timestamps."""
     melody = dict(melody_guide or {})
@@ -1614,6 +1658,10 @@ def _filter_melody_to_vocal_windows(
         }
         return melody
 
+    preface_metadata = {}
+    if preserve_vocal_stem_preface and "line_lyrics" in source:
+        windows, preface_metadata = _extend_first_window_to_preface_vocal_cluster(windows, notes)
+
     filtered_notes = _filter_notes_to_windows(notes, windows)
     filtered_contour = _filter_contour_to_windows(contour, windows, filtered_notes)
     melody["notes"] = filtered_notes
@@ -1629,8 +1677,111 @@ def _filter_melody_to_vocal_windows(
         "raw_contour_points": len(contour),
         "kept_contour_points": len(filtered_contour),
         "removed_contour_points": max(0, len(contour) - len(filtered_contour)),
+        **preface_metadata,
     }
     return melody
+
+
+def _extend_first_window_to_preface_vocal_cluster(
+    windows: list[tuple[float, float]],
+    notes: list[Any],
+) -> tuple[list[tuple[float, float]], dict[str, Any]]:
+    if not windows:
+        return windows, {}
+    first_start, first_end = windows[0]
+    if first_start <= 0:
+        return windows, {}
+
+    selected_cluster: dict[str, Any] | None = None
+    for cluster in _note_activity_clusters(notes):
+        cluster_end = float(cluster["end"])
+        if cluster_end >= first_start:
+            break
+        gap = first_start - cluster_end
+        if gap <= VOCAL_FILTER_PREFACE_MAX_GAP_SECONDS:
+            selected_cluster = cluster
+
+    if not selected_cluster:
+        return windows, {}
+
+    extended_start = max(0.0, float(selected_cluster["start"]) - VOCAL_FILTER_LEAD_SECONDS)
+    if extended_start >= first_start - 0.05:
+        return windows, {}
+
+    extended_windows = list(windows)
+    extended_windows[0] = (round(extended_start, 3), first_end)
+    return extended_windows, {
+        "preface_first_window_extended": True,
+        "preface_first_window_source": "vocal_stem_notes",
+        "preface_first_window_original_start": round(first_start, 3),
+        "preface_first_window_start": round(extended_start, 3),
+        "preface_first_window_cluster_end": round(float(selected_cluster["end"]), 3),
+        "preface_first_window_gap": round(first_start - float(selected_cluster["end"]), 3),
+        "preface_first_window_notes": int(selected_cluster["count"]),
+    }
+
+
+def _note_activity_clusters(notes: list[Any]) -> list[dict[str, Any]]:
+    intervals = []
+    for note in notes:
+        if not isinstance(note, dict):
+            continue
+        start = _safe_float(note.get("start"))
+        end = _safe_float(note.get("end"))
+        confidence = _safe_float(note.get("confidence"))
+        if start is None or end is None or end <= start:
+            continue
+        if confidence is None or confidence < VOCAL_FILTER_PREFACE_MIN_CONFIDENCE:
+            continue
+        intervals.append((start, end, confidence))
+
+    intervals.sort()
+    clusters: list[dict[str, Any]] = []
+    current_start: float | None = None
+    current_end: float | None = None
+    confidence_total = 0.0
+    count = 0
+
+    def flush() -> None:
+        nonlocal current_start, current_end, confidence_total, count
+        if current_start is None or current_end is None or count <= 0:
+            return
+        duration = current_end - current_start
+        mean_confidence = confidence_total / count
+        if duration >= VOCAL_FILTER_PREFACE_MIN_SECONDS:
+            clusters.append(
+                {
+                    "start": round(current_start, 3),
+                    "end": round(current_end, 3),
+                    "duration": round(duration, 3),
+                    "confidence": round(mean_confidence, 3),
+                    "count": count,
+                }
+            )
+        current_start = None
+        current_end = None
+        confidence_total = 0.0
+        count = 0
+
+    for start, end, confidence in intervals:
+        if current_start is None or current_end is None:
+            current_start = start
+            current_end = end
+            confidence_total = confidence
+            count = 1
+            continue
+        if start - current_end <= VOCAL_FILTER_PREFACE_MAX_NOTE_GAP_SECONDS:
+            current_end = max(current_end, end)
+            confidence_total += confidence
+            count += 1
+            continue
+        flush()
+        current_start = start
+        current_end = end
+        confidence_total = confidence
+        count = 1
+    flush()
+    return clusters
 
 
 def _vocal_timing_windows(
@@ -2053,6 +2204,16 @@ def _separate_coach_stems(media_path: Path) -> dict[str, Any] | None:
 
 def _separate_coach_stems_with_service(service_url: str, media_path: Path) -> dict[str, Any]:
     vocals_path, instrumental_path = _stem_output_paths(media_path)
+    if _existing_stems_are_ready(vocals_path, instrumental_path):
+        return {
+            "status": "ready",
+            "engine": "demucs_cached",
+            "model": os.environ.get(DEMUCS_MODEL_ENV, "htdemucs"),
+            "device": "cached",
+            "vocals_path": str(vocals_path),
+            "instrumental_path": str(instrumental_path),
+        }
+
     base_url = service_url.rsplit("/", 1)[0]
     response = requests.post(
         f"{base_url}/separate",
@@ -2074,6 +2235,18 @@ def _separate_coach_stems_with_service(service_url: str, media_path: Path) -> di
         "vocals_path": payload.get("vocals_path") or str(vocals_path),
         "instrumental_path": payload.get("instrumental_path") or str(instrumental_path),
     }
+
+
+def _existing_stems_are_ready(vocals_path: Path, instrumental_path: Path) -> bool:
+    try:
+        return (
+            vocals_path.is_file()
+            and instrumental_path.is_file()
+            and vocals_path.stat().st_size > 1024
+            and instrumental_path.stat().st_size > 1024
+        )
+    except OSError:
+        return False
 
 
 def _stem_output_paths(media_path: Path) -> tuple[Path, Path]:
@@ -2137,24 +2310,145 @@ def _deepseek_reasoning_effort() -> str:
     return effort if effort in {"high", "max"} else DEFAULT_DEEPSEEK_REASONING_EFFORT
 
 
-def _transcribe_coach_vocals(media_path: Path) -> dict[str, Any] | None:
+def _transcribe_and_align_coach_vocals(
+    media_path: Path,
+    lyrics: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    transcript = _transcribe_coach_vocals(media_path)
+    transcript_alignment = build_word_alignment_from_transcript(
+        lyrics,
+        transcript.get("words") if isinstance(transcript, dict) else [],
+        method="faster_whisper_word_alignment",
+    )
+    if isinstance(transcript, dict):
+        transcript = {**transcript, "alignment_coverage": _alignment_coverage(transcript_alignment)}
+    if not _should_retry_transcription_with_lyrics_prompt(lyrics, transcript_alignment):
+        return transcript, transcript_alignment
+
+    prompt = _transcription_prompt_from_lyrics(lyrics)
+    if not prompt:
+        return transcript, transcript_alignment
+
+    retry_transcript = _transcribe_coach_vocals(
+        media_path,
+        vad_filter=False,
+        initial_prompt=prompt,
+        beam_size=8,
+        mode="lyrics_prompt_no_vad",
+    )
+    retry_alignment = build_word_alignment_from_transcript(
+        lyrics,
+        retry_transcript.get("words") if isinstance(retry_transcript, dict) else [],
+        method="faster_whisper_lyrics_prompt_no_vad_alignment",
+    )
+    if isinstance(retry_transcript, dict):
+        retry_transcript = {**retry_transcript, "alignment_coverage": _alignment_coverage(retry_alignment)}
+    if _alignment_coverage(retry_alignment) <= _alignment_coverage(transcript_alignment):
+        return transcript, transcript_alignment
+
+    selected = dict(retry_transcript or {})
+    selected["fallback_of"] = _transcript_metadata(transcript)
+    selected["selection_reason"] = "lyrics_prompt_no_vad_improved_alignment"
+    selected["alignment_coverage"] = _alignment_coverage(retry_alignment)
+    return selected, retry_alignment
+
+
+def _should_retry_transcription_with_lyrics_prompt(
+    lyrics: dict[str, Any],
+    transcript_alignment: dict[str, Any] | None,
+) -> bool:
+    if not _lyrics_ready(lyrics):
+        return False
+    if not _transcription_prompt_from_lyrics(lyrics):
+        return False
+    return _alignment_coverage(transcript_alignment) < TRANSCRIPT_RETRY_MIN_ALIGNMENT_COVERAGE
+
+
+def _transcription_prompt_from_lyrics(lyrics: dict[str, Any]) -> str:
+    if not _lyrics_ready(lyrics):
+        return ""
+    lines = lyrics.get("lines") if isinstance(lyrics.get("lines"), list) else []
+    fragments = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        text = re.sub(r"\s+", " ", str(line.get("text") or "")).strip()
+        if text:
+            fragments.append(text)
+        prompt = " ".join(fragments)
+        if len(prompt) >= TRANSCRIPTION_PROMPT_MAX_CHARS:
+            return prompt[:TRANSCRIPTION_PROMPT_MAX_CHARS]
+    return " ".join(fragments)[:TRANSCRIPTION_PROMPT_MAX_CHARS]
+
+
+def _alignment_coverage(alignment: dict[str, Any] | None) -> float:
+    if not isinstance(alignment, dict):
+        return 0.0
+    confidence = alignment.get("confidence") if isinstance(alignment.get("confidence"), dict) else {}
+    try:
+        return float(confidence.get("overall") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _transcript_metadata(transcript: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(transcript, dict):
+        return {"status": "missing"}
+    return {
+        "status": transcript.get("status"),
+        "engine": transcript.get("engine"),
+        "model": transcript.get("model"),
+        "language": transcript.get("language"),
+        "vad_filter": transcript.get("vad_filter"),
+        "prompted": transcript.get("prompted"),
+        "word_count": len(transcript.get("words") or []),
+        "alignment_coverage": transcript.get("alignment_coverage"),
+    }
+
+
+def _transcribe_coach_vocals(
+    media_path: Path,
+    *,
+    vad_filter: bool = True,
+    initial_prompt: str | None = None,
+    beam_size: int = 5,
+    mode: str = "default",
+) -> dict[str, Any] | None:
     service_url = os.environ.get(SCORING_SERVICE_ENV, "").strip()
     if not service_url:
         return None
     try:
-        return _transcribe_coach_vocals_with_service(service_url, media_path)
+        return _transcribe_coach_vocals_with_service(
+            service_url,
+            media_path,
+            vad_filter=vad_filter,
+            initial_prompt=initial_prompt,
+            beam_size=beam_size,
+            mode=mode,
+        )
     except requests.RequestException as exc:
         logging.warning("Coach transcription service failed for %s: %s", media_path, exc)
         return None
 
 
-def _transcribe_coach_vocals_with_service(service_url: str, media_path: Path) -> dict[str, Any]:
+def _transcribe_coach_vocals_with_service(
+    service_url: str,
+    media_path: Path,
+    *,
+    vad_filter: bool,
+    initial_prompt: str | None,
+    beam_size: int,
+    mode: str,
+) -> dict[str, Any]:
     base_url = service_url.rsplit("/", 1)[0]
     response = requests.post(
         f"{base_url}/transcribe",
         json={
             "input_path": str(media_path),
             "model": os.environ.get(TRANSCRIBE_MODEL_ENV, "medium"),
+            "vad_filter": bool(vad_filter),
+            "initial_prompt": initial_prompt or None,
+            "beam_size": int(beam_size),
         },
         timeout=_transcribe_timeout_seconds(),
     )
@@ -2165,6 +2459,9 @@ def _transcribe_coach_vocals_with_service(service_url: str, media_path: Path) ->
         "engine": payload.get("engine", "faster-whisper"),
         "model": payload.get("model"),
         "device": payload.get("device"),
+        "mode": mode,
+        "vad_filter": payload.get("vad_filter", vad_filter),
+        "prompted": payload.get("prompted", bool(initial_prompt)),
         "language": payload.get("language"),
         "language_probability": payload.get("language_probability"),
         "words": payload.get("words") or [],

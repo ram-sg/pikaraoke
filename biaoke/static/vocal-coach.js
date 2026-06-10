@@ -134,6 +134,7 @@
     recentErrors: [],
     metrics: emptyMetrics(),
     songGuide: null,
+    songGuideKey: null,
     songGuideLoading: false,
     songSync: null,
     songSyncTimer: null,
@@ -366,6 +367,24 @@
     clearVocalReferenceAudio();
     els["coach-video-source"].setAttribute("src", "");
     els["coach-video-container"].classList.remove("is-playing");
+  }
+
+  function nowPlayingSongKey(np = state.nowPlaying) {
+    const current = np || {};
+    return [
+      current.now_playing_url || "",
+      current.now_playing || "",
+      current.now_playing_duration || "",
+    ].join("|");
+  }
+
+  function clearLyricRenderCaches() {
+    state.lyricPhrasesCacheKey = null;
+    state.lyricPhrasesCache = null;
+    state.lyricLaneCacheKey = null;
+    state.lyricLaneCache = null;
+    state.lyricVisualCacheKey = null;
+    state.lyricVisualIntervals = null;
   }
 
   function vocalReferenceUrlForCurrentSong() {
@@ -1086,6 +1105,7 @@
     );
     state.lyricsOffsetSeconds = Math.round(state.lyricsOffsetSeconds * 10) / 10;
     setLyricsOffsetDisplay();
+    clearLyricRenderCaches();
     updateLyrics(getVideoPlayer().currentTime || 0);
     persistLyricsOffset();
   }
@@ -1096,6 +1116,7 @@
     state.lyricsHaveKaraokeTiming = false;
     state.activeLyricIndex = -1;
     state.currentSubtitleUrl = subtitleUrl || null;
+    clearLyricRenderCaches();
     els["coach-lyrics-current"].replaceChildren();
     els["coach-lyrics-next"].textContent = "";
 
@@ -1121,6 +1142,7 @@
       state.lyricPaintUnits = [];
       state.lyricsHaveKaraokeTiming = hasKaraokeTimingText(content);
       state.activeLyricIndex = -1;
+      clearLyricRenderCaches();
       if (state.lyrics.length === 0) {
         setLyricsStatus(TEXT.noLyrics, "is-warning");
         return;
@@ -1132,6 +1154,7 @@
       state.lyricPaintUnits = [];
       state.lyricsHaveKaraokeTiming = false;
       state.activeLyricIndex = -1;
+      clearLyricRenderCaches();
       setLyricsStatus(TEXT.lyricsError, "is-danger");
     }
   }
@@ -1155,6 +1178,7 @@
         state.lyricPaintUnits = [];
         state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
+        clearLyricRenderCaches();
         setLyricsStatus(TEXT.lyricsMismatch, "is-danger");
         return true;
       }
@@ -1163,6 +1187,7 @@
         state.lyricPaintUnits = [];
         state.lyricsHaveKaraokeTiming = false;
         state.activeLyricIndex = -1;
+        clearLyricRenderCaches();
         setLyricsStatus(guide.message || TEXT.noLyrics, guide.status === "error" ? "is-danger" : "is-warning");
         return true;
       }
@@ -1172,6 +1197,7 @@
         : [];
       state.lyricsHaveKaraokeTiming = Boolean(guide.has_karaoke_timing);
       state.activeLyricIndex = -1;
+      clearLyricRenderCaches();
       setLyricsStatus(TEXT.lyricsReady, "is-ready");
       return true;
     } catch (error) {
@@ -1330,6 +1356,7 @@
     if (!state.nowPlaying.now_playing) {
       clearVideo();
       state.songGuide = null;
+      state.songGuideKey = null;
       state.songSync = null;
       setVocalReferenceAvailable(false);
       await loadLyrics(null);
@@ -1343,12 +1370,10 @@
       await loadLyrics(subtitleUrl);
     }
 
-    if (
-      selectedMode() === "song" &&
-      !state.songGuideLoading &&
-      (!state.songGuide || state.songGuide.title !== state.nowPlaying.now_playing)
-    ) {
+    const songKey = nowPlayingSongKey(state.nowPlaying);
+    if (selectedMode() === "song" && !state.songGuideLoading && state.songGuideKey !== songKey) {
       state.songGuide = null;
+      state.songGuideKey = null;
       state.songSync = null;
       setVocalReferenceAvailable(false);
       loadSongGuide(true);
@@ -1579,6 +1604,7 @@
       }
       if (guide.notes.length === 0) {
         state.songGuide = null;
+        state.songGuideKey = null;
         state.songSync = null;
         setVocalReferenceAvailable(false);
         setStatus(guide.message || TEXT.noGuide, guide.status === "idle" ? "" : "is-warning");
@@ -1586,6 +1612,7 @@
       }
 
       state.songGuide = guide;
+      state.songGuideKey = nowPlayingSongKey();
       setVocalReferenceAvailable(hasVocalReference(guide));
       state.songSync = {
         position: Number(guide.playback_position || 0),
@@ -1602,6 +1629,7 @@
     } catch (error) {
       console.log("Could not load song melody guide", error);
       state.songGuide = null;
+      state.songGuideKey = null;
       state.songSync = null;
       setVocalReferenceAvailable(false);
       setStatus(TEXT.guideError, "is-danger");

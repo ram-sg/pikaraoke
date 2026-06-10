@@ -53,3 +53,26 @@ def test_vocal_activity_alignment_keeps_source_when_no_activity_matches():
     assert guide["alignment"]["method"] == "line_timing_fallback"
     assert unit["start"] == 20.0
     assert unit["end"] == 24.0
+
+
+def test_vocal_activity_alignment_does_not_move_lrc_start_later():
+    lyrics = {
+        "status": "ready",
+        "confidence": 0.8,
+        "has_karaoke_timing": False,
+        "lines": [{"start": 37.53, "end": 55.68, "text": "I'm the man in the box"}],
+    }
+    melody = {
+        "notes": [
+            {"start": 39.2, "end": 40.6, "midi": 56, "confidence": 0.9},
+            {"start": 40.8, "end": 42.9, "midi": 61, "confidence": 0.88},
+        ]
+    }
+
+    guide = with_vocal_activity_alignment(lyrics, melody)
+    unit = guide["alignment"]["paint_units"][0]
+
+    assert guide["alignment"]["method"] == "line_timing_vocal_activity"
+    assert unit["start"] == 37.53
+    assert unit["source_start"] == 37.53
+    assert unit["precision"] == "line_vocal_activity"
