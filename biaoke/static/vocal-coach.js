@@ -2765,7 +2765,7 @@
       const denseRate = Math.min(VOCAL_TIMELINE_MAX_DENSE_RATE, minimumWidth / Math.max(1, baseWidth));
       rate = hasSustain ? Math.min(rate, denseRate) : Math.max(rate, denseRate);
     }
-    return Math.max(4, baseWidth * rate, hasSustain ? 0 : minimumWidth);
+    return Math.max(4, baseWidth * rate, minimumWidth);
   }
 
   function timelineSegmentKind(activeEvents) {
@@ -3256,9 +3256,10 @@
       const startX = xForTime(Number(word.start));
       const endX = xForTime(Number(word.end));
       const preferredX = startX + 6;
-      const x = Math.max(preferredX, previousRight + minGap);
+      const x = preferredX;
       const slotEndX = Math.max(x + 1, endX - 6);
-      items.push({ word, x, endX: slotEndX, width });
+      const overlap = Math.max(0, previousRight + minGap - x);
+      items.push({ word, x, endX: slotEndX, width, overlap });
       minX = Math.min(minX, x);
       maxX = Math.max(maxX, x + width, slotEndX);
       previousRight = x + width;
