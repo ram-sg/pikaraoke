@@ -87,6 +87,57 @@ FORCED_ALIGNMENT_MIN_COVERAGE = 0.35
 FORCED_ALIGNMENT_LINE_MIN_TRANSCRIPT_COVERAGE = 0.32
 TRANSCRIPT_RETRY_MIN_ALIGNMENT_COVERAGE = 0.68
 TRANSCRIPTION_PROMPT_MAX_CHARS = 2200
+ALIGNMENT_FIRST_WORD_ONSET_LEAD_SECONDS = 3.0
+ALIGNMENT_FIRST_WORD_ONSET_MIN_SHIFT_SECONDS = 0.12
+ALIGNMENT_FIRST_WORD_ONSET_MIN_CONFIDENCE = 0.68
+ALIGNMENT_FIRST_WORD_ONSET_MAX_PREVIOUS_LINE_OVERLAP_SECONDS = 0.55
+ALIGNMENT_FIRST_WORD_ONSET_MAX_NOTE_GAP_SECONDS = 0.85
+ALIGNMENT_FIRST_WORD_ONSET_END_GRACE_SECONDS = 0.55
+ALIGNMENT_INTERNAL_WORD_ONSET_LEAD_SECONDS = 1.65
+ALIGNMENT_INTERNAL_WORD_ONSET_MAX_NOTE_GAP_SECONDS = 0.85
+ALIGNMENT_INTERNAL_WORD_ONSET_END_GRACE_SECONDS = 0.85
+ALIGNMENT_INTERNAL_WORD_PREVIOUS_MIN_SECONDS = 0.16
+ALIGNMENT_ADJUSTABLE_SHORT_VOCALIZATIONS = {
+    "ah",
+    "eh",
+    "ha",
+    "hey",
+    "la",
+    "na",
+    "oh",
+    "ooh",
+    "uh",
+    "uhh",
+    "woo",
+    "yeah",
+}
+ALIGNMENT_ONSET_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "be",
+    "he",
+    "her",
+    "him",
+    "his",
+    "i",
+    "in",
+    "it",
+    "me",
+    "my",
+    "of",
+    "on",
+    "or",
+    "she",
+    "the",
+    "them",
+    "to",
+    "we",
+    "who",
+    "you",
+    "your",
+}
 
 
 class CoachPreparationManager:
@@ -738,6 +789,8 @@ def _write_coach_guide(
         )
         if word_alignment:
             lyrics["alignment"] = word_alignment
+    if isinstance(lyrics.get("alignment"), dict):
+        lyrics["alignment"] = _adjust_first_word_onsets_with_melody(lyrics["alignment"], melody_guide)
     quality_lyrics_guide = {"lyrics": lyrics}
     payload = {
         "schema": COACH_GUIDE_SCHEMA,
@@ -904,6 +957,212 @@ def _merge_alignment_with_fallback(
     confidence["fallback_method"] = fallback_alignment.get("method")
     merged_alignment["confidence"] = confidence
     return merged_alignment
+
+
+def _adjust_first_word_onsets_with_melody(
+    alignment: dict[str, Any],
+    melody_guide: dict[str, Any],
+) -> dict[str, Any]:
+    units = alignment.get("paint_units") if isinstance(alignment.get("paint_units"), list) else []
+    if not units:
+        return alignment
+
+    note_spans = _melody_onset_spans(melody_guide)
+    if not note_spans:
+        return alignment
+
+    adjusted_units = [dict(unit) if isinstance(unit, dict) else unit for unit in units]
+    line_groups: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+    for index, unit in enumerate(adjusted_units):
+        if not isinstance(unit, dict):
+            continue
+        if str(unit.get("unit_type") or "").strip().casefold() != "word":
+            continue
+        line_index = _safe_int(unit.get("line_index"), default=-1)
+        if line_index < 0:
+            continue
+        line_groups.setdefault(line_index, []).append((index, unit))
+
+    first_word_changes = 0
+    internal_word_changes = 0
+    previous_line_end: float | None = None
+    for line_index in sorted(line_groups):
+        line_units = sorted(
+            line_groups[line_index],
+            key=lambda item: (
+                _safe_int(item[1].get("unit_index"), default=0),
+                _safe_float(item[1].get("start")) or 0.0,
+            ),
+        )
+        if not line_units:
+            continue
+
+        for position, (unit_index, unit) in enumerate(line_units):
+            start = _safe_float(unit.get("start"))
+            end = _safe_float(unit.get("end"))
+            if start is None or end is None or end <= start:
+                continue
+
+            previous_unit = line_units[position - 1][1] if position > 0 else None
+            is_first_word = position == 0
+            if not is_first_word and not _word_can_use_internal_vocal_onset(str(unit.get("text") or "")):
+                continue
+
+            if is_first_word:
+                lower_bound = max(
+                    0.0,
+                    start - ALIGNMENT_FIRST_WORD_ONSET_LEAD_SECONDS,
+                    (previous_line_end or 0.0) - ALIGNMENT_FIRST_WORD_ONSET_MAX_PREVIOUS_LINE_OVERLAP_SECONDS,
+                )
+                onset = _melody_onset_before_word(
+                    note_spans,
+                    lower_bound,
+                    start,
+                    max_note_gap=ALIGNMENT_FIRST_WORD_ONSET_MAX_NOTE_GAP_SECONDS,
+                    end_grace=ALIGNMENT_FIRST_WORD_ONSET_END_GRACE_SECONDS,
+                )
+            else:
+                previous_start = _safe_float(previous_unit.get("start")) if isinstance(previous_unit, dict) else None
+                if previous_start is None:
+                    continue
+                if (
+                    "+vocal_onset" in str(previous_unit.get("precision") or "")
+                    and not _word_is_short_vocalization(str(unit.get("text") or ""))
+                ):
+                    continue
+                lower_bound = max(
+                    0.0,
+                    start - ALIGNMENT_INTERNAL_WORD_ONSET_LEAD_SECONDS,
+                    previous_start + ALIGNMENT_INTERNAL_WORD_PREVIOUS_MIN_SECONDS,
+                )
+                onset = _melody_onset_before_word(
+                    note_spans,
+                    lower_bound,
+                    start,
+                    max_note_gap=ALIGNMENT_INTERNAL_WORD_ONSET_MAX_NOTE_GAP_SECONDS,
+                    end_grace=ALIGNMENT_INTERNAL_WORD_ONSET_END_GRACE_SECONDS,
+                )
+
+            if onset is None or start - onset < ALIGNMENT_FIRST_WORD_ONSET_MIN_SHIFT_SECONDS:
+                continue
+
+            adjusted = dict(unit)
+            adjusted["source_start"] = round(start, 3)
+            adjusted["start"] = round(onset, 3)
+            adjusted["precision"] = f"{unit.get('precision') or 'word'}+vocal_onset"
+            adjusted["confidence"] = round(max(_safe_float(unit.get("confidence")) or 0.0, 0.62), 3)
+            adjusted_units[unit_index] = adjusted
+            line_units[position] = (unit_index, adjusted)
+            if not is_first_word and isinstance(previous_unit, dict):
+                _truncate_previous_word_for_onset(previous_unit, adjusted_units, line_units[position - 1][0], onset)
+            if is_first_word:
+                first_word_changes += 1
+            else:
+                internal_word_changes += 1
+
+        line_end_values = [
+            _safe_float(unit.get("end"))
+            for _index, unit in line_units
+            if isinstance(unit, dict) and _safe_float(unit.get("end")) is not None
+        ]
+        if line_end_values:
+            previous_line_end = max(line_end_values)
+
+    changed = first_word_changes + internal_word_changes
+    if changed <= 0:
+        return alignment
+
+    adjusted = dict(alignment)
+    adjusted["paint_units"] = adjusted_units
+    confidence = dict(adjusted.get("confidence") or {})
+    confidence["vocal_onset_adjusted_first_words"] = first_word_changes
+    confidence["vocal_onset_adjusted_internal_words"] = internal_word_changes
+    adjusted["confidence"] = confidence
+    return adjusted
+
+
+def _truncate_previous_word_for_onset(
+    previous_unit: dict[str, Any],
+    adjusted_units: list[Any],
+    previous_index: int,
+    onset: float,
+) -> None:
+    previous_start = _safe_float(previous_unit.get("start"))
+    previous_end = _safe_float(previous_unit.get("end"))
+    if previous_start is None or previous_end is None or onset >= previous_end:
+        return
+    new_end = max(previous_start + 0.08, onset)
+    if new_end >= previous_end - 0.04:
+        return
+    previous_unit["source_end"] = round(previous_end, 3)
+    previous_unit["end"] = round(new_end, 3)
+    previous_unit["precision"] = f"{previous_unit.get('precision') or 'word'}+vocal_onset_boundary"
+    adjusted_units[previous_index] = previous_unit
+
+
+def _word_can_use_internal_vocal_onset(text: str) -> bool:
+    normalized = _normalized_onset_word(text)
+    if not normalized:
+        return False
+    if normalized in ALIGNMENT_ADJUSTABLE_SHORT_VOCALIZATIONS:
+        return True
+    if normalized in ALIGNMENT_ONSET_STOP_WORDS:
+        return False
+    return len(normalized) >= 4
+
+
+def _word_is_short_vocalization(text: str) -> bool:
+    return _normalized_onset_word(text) in ALIGNMENT_ADJUSTABLE_SHORT_VOCALIZATIONS
+
+
+def _normalized_onset_word(text: str) -> str:
+    return re.sub(r"[^a-z0-9']+", "", str(text or "").casefold())
+
+
+def _melody_onset_spans(melody_guide: dict[str, Any]) -> list[tuple[float, float]]:
+    spans = []
+    notes = melody_guide.get("notes") if isinstance(melody_guide.get("notes"), list) else []
+    for note in notes:
+        if not isinstance(note, dict):
+            continue
+        start = _safe_float(note.get("start"))
+        end = _safe_float(note.get("end"))
+        confidence = _safe_float(note.get("confidence"))
+        if start is None or end is None or end <= start:
+            continue
+        if confidence is not None and confidence < ALIGNMENT_FIRST_WORD_ONSET_MIN_CONFIDENCE:
+            continue
+        spans.append((start, end))
+    spans.sort()
+    return spans
+
+
+def _melody_onset_before_word(
+    note_spans: list[tuple[float, float]],
+    lower_bound: float,
+    word_start: float,
+    *,
+    max_note_gap: float,
+    end_grace: float,
+) -> float | None:
+    candidates = [
+        (start, end)
+        for start, end in note_spans
+        if start < word_start and end > lower_bound and start >= lower_bound - 0.05
+    ]
+    if not candidates:
+        return None
+    current_start, current_end = candidates[0]
+    for start, end in candidates[1:]:
+        if start - current_end > max_note_gap:
+            if current_end >= word_start - end_grace:
+                return max(lower_bound, current_start)
+            current_start, current_end = start, end
+            continue
+        current_end = max(current_end, end)
+    if current_end >= word_start - end_grace:
+        return max(lower_bound, current_start)
+    return None
 
 
 def _lyrics_guide_for_quality(

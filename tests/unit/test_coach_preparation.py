@@ -5,6 +5,7 @@ import pytest
 
 from biaoke.lib.coach_preparation import (
     CoachPreparationManager,
+    _adjust_first_word_onsets_with_melody,
     _filter_melody_to_vocal_windows,
     _lyrics_lines_for_forced_alignment,
     _review_coach_guide_with_ai,
@@ -612,6 +613,146 @@ def test_transcription_retries_without_vad_when_prompt_improves_alignment(tmp_pa
     assert alignment["paint_units"][0]["start"] == 30.5
     assert transcribe_mock.call_args_list[1].kwargs["vad_filter"] is False
     assert "man in the box" in transcribe_mock.call_args_list[1].kwargs["initial_prompt"]
+
+
+def test_adjust_first_word_onset_uses_nearby_vocal_note_without_crossing_previous_line():
+    alignment = {
+        "status": "ready",
+        "granularity": "word",
+        "paint_units": [
+            {"start": 72.0, "end": 73.0, "text": "eyes", "line_index": 0, "unit_index": 0, "unit_type": "word"},
+            {"start": 73.1, "end": 75.2, "text": "shut", "line_index": 0, "unit_index": 1, "unit_type": "word"},
+            {
+                "start": 77.72,
+                "end": 79.0,
+                "text": "Jesus",
+                "line_index": 1,
+                "unit_index": 0,
+                "unit_type": "word",
+                "precision": "mms_fa_forced_alignment",
+                "confidence": 0.33,
+            },
+            {
+                "start": 79.0,
+                "end": 80.4,
+                "text": "Christ",
+                "line_index": 1,
+                "unit_index": 1,
+                "unit_type": "word",
+            },
+        ],
+    }
+    melody = {
+        "notes": [
+            {"start": 74.2, "end": 75.3, "midi": 60, "confidence": 0.92},
+            {"start": 76.92, "end": 77.86, "midi": 63, "confidence": 0.88},
+        ]
+    }
+
+    adjusted = _adjust_first_word_onsets_with_melody(alignment, melody)
+    first_next_line = adjusted["paint_units"][2]
+
+    assert first_next_line["start"] == 76.92
+    assert first_next_line["source_start"] == 77.72
+    assert first_next_line["precision"].endswith("+vocal_onset")
+    assert adjusted["confidence"]["vocal_onset_adjusted_first_words"] == 1
+
+
+def test_adjust_first_word_onset_allows_small_melismatic_overlap():
+    alignment = {
+        "status": "ready",
+        "granularity": "word",
+        "paint_units": [
+            {"start": 74.58, "end": 75.18, "text": "shut", "line_index": 0, "unit_index": 7, "unit_type": "word"},
+            {
+                "start": 77.713,
+                "end": 78.555,
+                "text": "Jesus",
+                "line_index": 1,
+                "unit_index": 0,
+                "unit_type": "word",
+                "precision": "mms_fa_forced_alignment",
+                "confidence": 0.33,
+            },
+            {"start": 78.695, "end": 80.941, "text": "Christ", "line_index": 1, "unit_index": 1, "unit_type": "word"},
+        ],
+    }
+    melody = {
+        "notes": [
+            {"start": 74.75, "end": 76.35, "midi": 70, "confidence": 0.83},
+            {"start": 76.35, "end": 77.2, "midi": 69, "confidence": 0.81},
+            {"start": 77.2, "end": 77.95, "midi": 68, "confidence": 0.79},
+        ]
+    }
+
+    adjusted = _adjust_first_word_onsets_with_melody(alignment, melody)
+    jesus = adjusted["paint_units"][1]
+
+    assert jesus["start"] == 74.75
+    assert jesus["source_start"] == 77.713
+    assert jesus["precision"].endswith("+vocal_onset")
+
+
+def test_adjust_internal_singable_word_onset_and_truncates_previous_word():
+    alignment = {
+        "status": "ready",
+        "granularity": "word",
+        "paint_units": [
+            {"start": 52.8, "end": 55.06, "text": "come", "line_index": 0, "unit_index": 2, "unit_type": "word"},
+            {"start": 55.06, "end": 56.74, "text": "and", "line_index": 0, "unit_index": 3, "unit_type": "word"},
+            {
+                "start": 56.74,
+                "end": 57.38,
+                "text": "save",
+                "line_index": 0,
+                "unit_index": 4,
+                "unit_type": "word",
+                "precision": "transcript_word",
+                "confidence": 0.96,
+            },
+        ],
+    }
+    melody = {
+        "notes": [
+            {"start": 55.6, "end": 55.75, "midi": 53, "confidence": 0.75},
+            {"start": 56.4, "end": 56.55, "midi": 53, "confidence": 0.76},
+        ]
+    }
+
+    adjusted = _adjust_first_word_onsets_with_melody(alignment, melody)
+    previous = adjusted["paint_units"][1]
+    save = adjusted["paint_units"][2]
+
+    assert previous["end"] == 55.6
+    assert previous["source_end"] == 56.74
+    assert save["start"] == 55.6
+    assert save["source_start"] == 56.74
+    assert save["precision"] == "transcript_word+vocal_onset"
+    assert adjusted["confidence"]["vocal_onset_adjusted_internal_words"] == 1
+
+
+def test_adjust_internal_short_vocalization_onset():
+    alignment = {
+        "status": "ready",
+        "granularity": "word",
+        "paint_units": [
+            {"start": 10.0, "end": 10.4, "text": "La", "line_index": 0, "unit_index": 0, "unit_type": "word"},
+            {"start": 10.9, "end": 11.2, "text": "la", "line_index": 0, "unit_index": 1, "unit_type": "word"},
+            {"start": 11.8, "end": 12.2, "text": "oh", "line_index": 0, "unit_index": 2, "unit_type": "word"},
+        ],
+    }
+    melody = {
+        "notes": [
+            {"start": 10.72, "end": 10.95, "midi": 60, "confidence": 0.82},
+            {"start": 11.35, "end": 11.85, "midi": 62, "confidence": 0.84},
+        ]
+    }
+
+    adjusted = _adjust_first_word_onsets_with_melody(alignment, melody)
+
+    assert adjusted["paint_units"][1]["start"] == 10.72
+    assert adjusted["paint_units"][2]["start"] == 11.35
+    assert adjusted["confidence"]["vocal_onset_adjusted_internal_words"] == 2
 
 
 def test_reanalyze_track_queues_fresh_analysis(tmp_path):

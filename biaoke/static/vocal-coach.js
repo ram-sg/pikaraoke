@@ -169,6 +169,8 @@
     lyricLaneCache: null,
     lyricVisualCacheKey: null,
     lyricVisualIntervals: null,
+    songMidiRangeCacheKey: null,
+    songMidiRangeCache: null,
   };
 
   const els = {};
@@ -385,6 +387,8 @@
     state.lyricLaneCache = null;
     state.lyricVisualCacheKey = null;
     state.lyricVisualIntervals = null;
+    state.songMidiRangeCacheKey = null;
+    state.songMidiRangeCache = null;
   }
 
   function vocalReferenceUrlForCurrentSong() {
@@ -1984,6 +1988,9 @@
   }
 
   function songRoadMidiRange(songTime, minTime = null, maxTime = null) {
+    const stableRange = stableSongMidiRange();
+    if (stableRange) return stableRange;
+
     const notes = songGuideNotes();
     const contour = songGuideContour();
     const windowMinTime = Number.isFinite(minTime) ? minTime : songTime - 4;
@@ -2020,6 +2027,51 @@
     return { minMidi, maxMidi };
   }
 
+  function stableSongMidiRange() {
+    const notes = songGuideNotes();
+    const contour = songGuideContour();
+    const cacheKey = [
+      state.songGuideKey || state.songGuide?.title || "",
+      notes.length,
+      contour.length,
+      notes[0]?.start ?? "",
+      notes[notes.length - 1]?.end ?? "",
+    ].join("|");
+    if (state.songMidiRangeCacheKey === cacheKey && state.songMidiRangeCache) return state.songMidiRangeCache;
+
+    const midiValues = [];
+    notes.forEach((note) => {
+      const midi = Number(note.midi);
+      if (!Number.isFinite(midi)) return;
+      const outerBand = Math.max(...normalizePitchBands(note.pitchBandsCents)) / 100;
+      midiValues.push(midi - outerBand, midi, midi + outerBand);
+    });
+    contour.forEach((point) => {
+      const midi = Number(point.midi);
+      const confidence = Number(point.confidence ?? 1);
+      if (Number.isFinite(midi) && confidence >= REFERENCE_CONTOUR_MIN_CONFIDENCE) {
+        midiValues.push(midi - 0.4, midi, midi + 0.4);
+      }
+    });
+
+    if (!midiValues.length) return null;
+    midiValues.sort((a, b) => a - b);
+    const lowIndex = Math.floor((midiValues.length - 1) * 0.03);
+    const highIndex = Math.ceil((midiValues.length - 1) * 0.97);
+    let minMidi = Math.floor(midiValues[lowIndex]) - 2;
+    let maxMidi = Math.ceil(midiValues[highIndex]) + 2;
+    const span = maxMidi - minMidi;
+    if (span < 14) {
+      const pad = (14 - span) / 2;
+      minMidi -= pad;
+      maxMidi += pad;
+    }
+    const range = { minMidi, maxMidi };
+    state.songMidiRangeCacheKey = cacheKey;
+    state.songMidiRangeCache = range;
+    return range;
+  }
+
   function songGuideNotes() {
     return Array.isArray(state.songGuide?.notes) ? state.songGuide.notes : [];
   }
@@ -2029,15 +2081,7 @@
   }
 
   function songRoadLookaheadSeconds(songTime, notes = songGuideNotes()) {
-    const baseLookahead = STAGE_ROAD_LOOKAHEAD_SECONDS;
-    const hasVisibleNotes = notes.some(
-      (note) => Number(note.end) >= songTime - STAGE_ROAD_TRAIL_SECONDS && Number(note.start) <= songTime + baseLookahead
-    );
-    if (hasVisibleNotes) return baseLookahead;
-
-    const nextNote = notes.find((note) => Number(note.start) > songTime);
-    if (!nextNote) return baseLookahead;
-    return clamp(Number(nextNote.start) - songTime + 4, baseLookahead, STAGE_ROAD_MAX_LOOKAHEAD_SECONDS);
+    return STAGE_ROAD_LOOKAHEAD_SECONDS;
   }
 
   function songRoadLayout(width, height) {
@@ -2371,13 +2415,12 @@
       if (previous) {
         const gapSeconds = Math.max(0, start - previous.end);
         if (gapSeconds > 0.04) {
-          cursor += clamp(gapSeconds * pixelsPerSecond * 0.46, 8, 92);
-          if (unit.lineIndex !== previous.lineIndex) cursor += 18;
+          cursor += gapSeconds * pixelsPerSecond;
         }
       }
 
       const textWidth = ctx.measureText(unit.text).width;
-      const durationWidth = (end - start) * pixelsPerSecond * 0.92;
+      const durationWidth = (end - start) * pixelsPerSecond;
       const minimumWidth = clamp(textWidth + 20, 28, 240);
       const visualWidth = Math.max(durationWidth, minimumWidth);
       intervals.push({
@@ -2396,7 +2439,7 @@
   function visualPositionAtTime(time, intervals, pixelsPerSecond) {
     if (!intervals.length) return time * pixelsPerSecond;
     const first = intervals[0];
-    if (time <= first.start) return first.visualStart + (time - first.start) * pixelsPerSecond * 0.46;
+    if (time <= first.start) return first.visualStart + (time - first.start) * pixelsPerSecond;
 
     let low = 0;
     let high = intervals.length - 1;
@@ -2421,14 +2464,14 @@
     }
 
     const last = intervals[intervals.length - 1];
-    return last.visualEnd + (time - last.end) * pixelsPerSecond * 0.46;
+    return last.visualEnd + (time - last.end) * pixelsPerSecond;
   }
 
   function timeAtVisualPosition(visualPosition, intervals, pixelsPerSecond) {
     if (!intervals.length) return visualPosition / pixelsPerSecond;
     const first = intervals[0];
     if (visualPosition <= first.visualStart) {
-      return first.start + (visualPosition - first.visualStart) / Math.max(1, pixelsPerSecond * 0.46);
+      return first.start + (visualPosition - first.visualStart) / Math.max(1, pixelsPerSecond);
     }
 
     let low = 0;
@@ -2462,7 +2505,7 @@
     }
 
     const last = intervals[intervals.length - 1];
-    return last.end + (visualPosition - last.visualEnd) / Math.max(1, pixelsPerSecond * 0.46);
+    return last.end + (visualPosition - last.visualEnd) / Math.max(1, pixelsPerSecond);
   }
 
   function lyricFontForWidth(ctx, text, maxWidth, baseSize = 34, minSize = 18) {
