@@ -1902,12 +1902,12 @@
     ctx.closePath();
   }
 
-  function songRoadMidiRange(songTime) {
+  function songRoadMidiRange(songTime, minTime = null, maxTime = null) {
     const notes = songGuideNotes();
     const contour = songGuideContour();
-    const minTime = songTime - 4;
-    const maxTime = songTime + songRoadLookaheadSeconds(songTime, notes);
-    const visibleNotes = visibleRoadNotes(notes, minTime, maxTime);
+    const windowMinTime = Number.isFinite(minTime) ? minTime : songTime - 4;
+    const windowMaxTime = Number.isFinite(maxTime) ? maxTime : songTime + songRoadLookaheadSeconds(songTime, notes);
+    const visibleNotes = visibleRoadNotes(notes, windowMinTime, windowMaxTime);
     const midiValues = [];
     visibleNotes.forEach((note) => {
       const midi = Number(note.midi);
@@ -1915,7 +1915,7 @@
       const outerBand = Math.max(...normalizePitchBands(note.pitchBandsCents)) / 100;
       midiValues.push(midi - outerBand, midi, midi + outerBand);
     });
-    visibleRoadContour(contour, minTime, maxTime).forEach((point) => {
+    visibleRoadContour(contour, windowMinTime, windowMaxTime).forEach((point) => {
       const midi = Number(point.midi);
       if (Number.isFinite(midi)) midiValues.push(midi - 0.4, midi, midi + 0.4);
     });
@@ -2009,8 +2009,8 @@
   }
 
   function visibleLyricSegments(minTime, maxTime) {
-    const paintUnits = normalizedLyricPaintUnits();
-    if (paintUnits.length > 0) return paintUnits.filter((unit) => unit.end >= minTime && unit.start <= maxTime);
+    const wordTimeline = lyricWordTimelineSegments();
+    if (wordTimeline.length > 0) return wordTimeline.filter((unit) => unit.end >= minTime && unit.start <= maxTime);
 
     const offset = Number(state.lyricsOffsetSeconds || 0);
     const segments = [];
@@ -2062,95 +2062,102 @@
     return segments.sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
   }
 
-  function activePaintUnitLine(songTime) {
-    const wordUnits = normalizedLyricPaintUnits().filter((unit) => unit.unitType === "word");
-    if (wordUnits.length === 0) return null;
+  function lyricWordTimelineSegments() {
+    if (!state.lyrics.length || !Array.isArray(state.lyricPaintUnits) || state.lyricPaintUnits.length === 0) return [];
 
-    const grouped = new Map();
-    wordUnits.forEach((unit) => {
-      const key = Number.isFinite(unit.lineIndex) ? unit.lineIndex : 0;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(unit);
+    const offset = Number(state.lyricsOffsetSeconds || 0);
+    const unitsByLine = new Map();
+    normalizedLyricPaintUnits()
+      .filter((unit) => unit.unitType === "word")
+      .forEach((unit) => {
+        const lineIndex = Number.isFinite(unit.lineIndex) ? unit.lineIndex : 0;
+        if (!unitsByLine.has(lineIndex)) unitsByLine.set(lineIndex, new Map());
+        const lineUnits = unitsByLine.get(lineIndex);
+        if (!lineUnits.has(unit.segmentIndex)) lineUnits.set(unit.segmentIndex, unit);
+      });
+
+    const segments = [];
+    state.lyrics.forEach((line, lineIndex) => {
+      const words = splitLyricCaptionWords(line.text);
+      if (!words.length) return;
+      const lineStart = Number(line.start) + offset;
+      const lineEnd = Number(line.end) + offset;
+      if (!Number.isFinite(lineStart) || !Number.isFinite(lineEnd) || lineEnd <= lineStart) return;
+
+      const lineUnits = unitsByLine.get(lineIndex) || new Map();
+      const wordSegments = words.map((text, index) => {
+        const unit = lineUnits.get(index);
+        return {
+          start: Number(unit?.start),
+          end: Number(unit?.end),
+          text,
+          lineIndex,
+          segmentIndex: index,
+          precision: unit ? unit.precision : "estimated_word",
+          unitType: "word",
+          estimated: !unit,
+        };
+      });
+
+      fillEstimatedWordTimes(wordSegments, lineStart, lineEnd);
+      wordSegments.forEach((segment) => {
+        if (!Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.end <= segment.start) return;
+        segments.push(segment);
+      });
     });
 
-    const lines = Array.from(grouped.entries())
-      .map(([lineIndex, units]) => {
-        const sortedUnits = units.sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
-        return {
-          lineIndex,
-          units: sortedUnits,
-          start: sortedUnits[0].start,
-          end: sortedUnits[sortedUnits.length - 1].end,
-          text: state.lyrics[lineIndex]?.text || sortedUnits.map((unit) => unit.text).join(" "),
-        };
-      })
-      .sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex);
-
-    return (
-      lines.find((line) => songTime >= line.start - 0.18 && songTime <= line.end + 0.45) ||
-      lines.find((line) => line.end >= songTime) ||
-      lines[lines.length - 1] ||
-      null
-    );
+    return segments.sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex || a.segmentIndex - b.segmentIndex);
   }
 
-  function drawPaintedWordLine(ctx, width, songTime, hitX, textY) {
-    const line = activePaintUnitLine(songTime);
-    if (!line || !line.units.length) return false;
+  function fillEstimatedWordTimes(wordSegments, lineStart, lineEnd) {
+    for (let index = 0; index < wordSegments.length; index++) {
+      const segment = wordSegments[index];
+      if (Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end > segment.start) continue;
 
-    const words = line.units;
-    const lineText = words.map((unit) => unit.text).join(" ");
-    const maxWidth = Math.max(120, width * 0.9);
-    const fontSize = lyricFontForWidth(ctx, lineText, maxWidth, 38, 18);
-    ctx.font = `900 ${fontSize}px sans-serif`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
+      let runEnd = index;
+      while (
+        runEnd + 1 < wordSegments.length &&
+        !(Number.isFinite(wordSegments[runEnd + 1].start) && Number.isFinite(wordSegments[runEnd + 1].end))
+      ) {
+        runEnd += 1;
+      }
 
-    const spaceWidth = Math.max(fontSize * 0.32, ctx.measureText(" ").width);
-    const layouts = [];
-    let totalWidth = 0;
-    words.forEach((word, index) => {
-      const wordWidth = ctx.measureText(word.text).width;
-      layouts.push({ word, x: totalWidth, width: wordWidth });
-      totalWidth += wordWidth + (index < words.length - 1 ? spaceWidth : 0);
-    });
-
-    let lineX = (width - totalWidth) / 2;
-    const activeIndex = words.findIndex((word) => songTime >= word.start && songTime < word.end);
-    if (activeIndex >= 0 && totalWidth > width - 32) {
-      const activeLayout = layouts[activeIndex];
-      const activeCenter = activeLayout.x + activeLayout.width * 0.5;
-      lineX = clamp(hitX - activeCenter, width - 20 - totalWidth, 20);
+      const previous = index > 0 ? wordSegments[index - 1] : null;
+      const next = runEnd + 1 < wordSegments.length ? wordSegments[runEnd + 1] : null;
+      const startBoundary =
+        previous && Number.isFinite(previous.end) && previous.end > lineStart ? previous.end : lineStart;
+      const endBoundary = next && Number.isFinite(next.start) && next.start > startBoundary ? next.start : lineEnd;
+      const duration = Math.max(0.18 * (runEnd - index + 1), endBoundary - startBoundary);
+      const slot = duration / (runEnd - index + 1);
+      for (let wordIndex = index; wordIndex <= runEnd; wordIndex++) {
+        const localIndex = wordIndex - index;
+        wordSegments[wordIndex].start = startBoundary + slot * localIndex;
+        wordSegments[wordIndex].end = startBoundary + slot * (localIndex + 1);
+      }
+      index = runEnd;
     }
+  }
 
-    const clipTop = textY - fontSize * 0.9;
-    const clipHeight = fontSize * 1.8;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(14, clipTop, width - 28, clipHeight);
-    ctx.clip();
-
-    layouts.forEach((layout) => {
-      const { word } = layout;
-      const x = lineX + layout.x;
-      const isDone = songTime >= word.end;
-      const isActive = songTime >= word.start && songTime < word.end;
-      ctx.fillStyle = isDone ? "rgba(18, 199, 156, 0.98)" : "rgba(246, 243, 234, 0.76)";
-      ctx.fillText(word.text, x, textY);
-
-      if (!isActive) return;
-      const progress = clamp((songTime - word.start) / Math.max(0.08, word.end - word.start), 0, 1);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x, clipTop, Math.max(1, layout.width * progress), clipHeight);
-      ctx.clip();
-      ctx.fillStyle = "rgba(18, 199, 156, 1)";
-      ctx.fillText(word.text, x, textY);
-      ctx.restore();
+  function visibleLyricPhrases(minTime, maxTime) {
+    const groups = new Map();
+    lyricWordTimelineSegments().forEach((segment) => {
+      if (!groups.has(segment.lineIndex)) groups.set(segment.lineIndex, []);
+      groups.get(segment.lineIndex).push(segment);
     });
 
-    ctx.restore();
-    return true;
+    return Array.from(groups.entries())
+      .map(([lineIndex, words]) => {
+        const sortedWords = words.sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
+        return {
+          lineIndex,
+          words: sortedWords,
+          start: sortedWords[0].start,
+          end: sortedWords[sortedWords.length - 1].end,
+          text: sortedWords.map((word) => word.text).join(" "),
+        };
+      })
+      .filter((phrase) => phrase.end >= minTime - 1.2 && phrase.start <= maxTime + 1.2)
+      .sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex);
   }
 
   function lyricFontForWidth(ctx, text, maxWidth, baseSize = 34, minSize = 18) {
@@ -2201,20 +2208,115 @@
     ctx.restore();
   }
 
+  function splitLyricCaptionWords(text) {
+    return String(text || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  }
+
+  function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY) {
+    if (!phrases.length) return false;
+
+    const laneHeight = 31;
+    const laneCount = 4;
+    const lanes = Array.from({ length: laneCount }, (_, index) => ({ index, right: -Infinity }));
+    const laneGap = 18;
+    ctx.save();
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.78)";
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
+
+    phrases.forEach((phrase) => {
+      const isActive = songTime >= phrase.start && songTime <= phrase.end;
+      const isDone = songTime > phrase.end;
+      const fontSize = isActive ? 25 : 22;
+      ctx.font = `900 ${fontSize}px sans-serif`;
+      const layouts = phraseWordLayouts(ctx, phrase.words, fontSize);
+      const textWidth = layouts.totalWidth;
+      const timeX1 = xForTime(phrase.start);
+      const timeX2 = xForTime(phrase.end);
+      const timeCenter = (timeX1 + timeX2) / 2;
+      const visualWidth = Math.max(90, timeX2 - timeX1, textWidth + 28);
+      const visualX = timeCenter - visualWidth / 2;
+      if (visualX > width + 120 || visualX + visualWidth < -120) return;
+
+      let lane = lanes.find((candidate) => visualX >= candidate.right + laneGap);
+      if (!lane) {
+        lane = lanes.reduce((best, candidate) => (candidate.right < best.right ? candidate : best), lanes[0]);
+        if (!isActive && visualX < lane.right + laneGap) return;
+      }
+      lane.right = Math.max(lane.right, visualX + visualWidth);
+
+      const y = textY + lane.index * laneHeight;
+      ctx.globalAlpha = phrase.words.every((word) => word.estimated) ? 0.72 : 1;
+      ctx.fillStyle = isActive
+        ? "rgba(237, 176, 73, 0.18)"
+        : isDone
+          ? "rgba(18, 199, 156, 0.1)"
+          : "rgba(246, 243, 234, 0.08)";
+      drawRoundRect(ctx, visualX, y - 17, visualWidth, 30, 8);
+      ctx.fill();
+
+      const textX = visualX + (visualWidth - textWidth) / 2;
+      layouts.items.forEach((layout) => {
+        const word = layout.word;
+        const x = textX + layout.x;
+        const wordActive = songTime >= word.start && songTime < word.end;
+        const wordDone = songTime >= word.end;
+        ctx.globalAlpha = word.estimated ? 0.72 : 1;
+        ctx.fillStyle = wordDone ? "rgba(18, 199, 156, 0.98)" : "rgba(246, 243, 234, 0.84)";
+        ctx.fillText(word.text, x, y);
+
+        if (!wordActive) return;
+        const progress = clamp((songTime - word.start) / Math.max(0.08, word.end - word.start), 0, 1);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y - fontSize, Math.max(1, layout.width * progress), fontSize * 2);
+        ctx.clip();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "rgba(18, 199, 156, 1)";
+        ctx.fillText(word.text, x, y);
+        ctx.restore();
+      });
+    });
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    return true;
+  }
+
+  function phraseWordLayouts(ctx, words, fontSize) {
+    const spaceWidth = Math.max(fontSize * 0.36, ctx.measureText(" ").width);
+    const items = [];
+    let totalWidth = 0;
+    words.forEach((word, index) => {
+      const width = ctx.measureText(word.text).width;
+      if (index > 0) totalWidth += spaceWidth;
+      items.push({ word, x: totalWidth, width });
+      totalWidth += width;
+    });
+    return { items, totalWidth };
+  }
+
   function drawStageLyricRail(ctx, width, xForTime, songTime, railY, minTime, maxTime, hitX) {
     if (!state.lyrics.length) return;
 
+    const phrases = visibleLyricPhrases(minTime, maxTime);
     const segments = visibleLyricSegments(minTime, maxTime);
-    if (segments.length === 0) return;
-    const hasWordPaintUnits = segments.some((segment) => segment.unitType === "word");
+    if (segments.length === 0 && phrases.length === 0) return;
+    const wordSegments = segments.filter((segment) => segment.unitType === "word");
+    const hasWordSegments = wordSegments.length > 0;
 
     const railH = 10;
     const railTop = railY - 13;
-    const textY = railY + (hasWordPaintUnits ? 30 : 20);
+    const textY = railY + (hasWordSegments ? 28 : 20);
 
     ctx.save();
     ctx.fillStyle = "rgba(3, 6, 10, 0.46)";
-    drawRoundRect(ctx, 0, railTop - 16, width, hasWordPaintUnits ? 94 : 78, 0);
+    drawRoundRect(ctx, 0, railTop - 16, width, hasWordSegments ? 138 : 78, 0);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(246, 243, 234, 0.14)";
@@ -2248,13 +2350,13 @@
         ctx.fill();
       }
 
-      if (!hasWordPaintUnits) {
+      if (!hasWordSegments) {
         drawLyricSegmentText(ctx, segment, x1, x2, textY, songTime, hitX, width);
       }
     });
 
-    if (hasWordPaintUnits) {
-      drawPaintedWordLine(ctx, width, songTime, hitX, textY);
+    if (hasWordSegments) {
+      drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8);
     }
 
     ctx.fillStyle = "rgba(246, 243, 234, 0.72)";
@@ -2265,6 +2367,95 @@
     ctx.restore();
     ctx.textAlign = "start";
     ctx.textBaseline = "alphabetic";
+  }
+
+  function drawLyricWordTimingBands(ctx, wordSegments, xForTime, layout, songTime) {
+    if (!wordSegments.length) return;
+    ctx.save();
+    wordSegments.forEach((segment) => {
+      const x1 = xForTime(segment.start);
+      const x2 = xForTime(segment.end);
+      if (x2 < 0 || x1 > layout.width) return;
+      const width = Math.max(2, x2 - x1);
+      const isActive = songTime >= segment.start && songTime < segment.end;
+      const isDone = songTime >= segment.end;
+      ctx.fillStyle = isActive
+        ? "rgba(237, 176, 73, 0.18)"
+        : isDone
+          ? "rgba(18, 199, 156, 0.055)"
+          : "rgba(246, 243, 234, 0.035)";
+      ctx.fillRect(Math.max(0, x1), layout.roadTop - 10, Math.min(layout.width, width), layout.railY - layout.roadTop + 34);
+
+      if (isActive) {
+        ctx.strokeStyle = "rgba(237, 176, 73, 0.5)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, layout.roadTop - 12);
+        ctx.lineTo(x1, layout.railY + 24);
+        ctx.stroke();
+      }
+    });
+    ctx.restore();
+  }
+
+  function drawLyricWordPitchBars(ctx, wordSegments, contour, notes, xForTime, yForMidi, layout, songTime) {
+    if (!wordSegments.length) return;
+    ctx.save();
+    wordSegments.forEach((segment) => {
+      const midi = lyricWordMidi(segment, contour, notes);
+      if (!Number.isFinite(midi)) return;
+      const x1 = Math.max(-48, xForTime(segment.start));
+      const x2 = Math.min(layout.width + 48, xForTime(segment.end));
+      if (x2 < -20 || x1 > layout.width + 20) return;
+      const width = Math.max(5, x2 - x1);
+      const y = clampRoadY(yForMidi(midi), layout);
+      const isActive = songTime >= segment.start && songTime < segment.end;
+      const isDone = songTime >= segment.end;
+      ctx.globalAlpha = segment.estimated ? 0.44 : 0.68;
+      ctx.fillStyle = isActive
+        ? "rgba(246, 243, 234, 0.82)"
+        : isDone
+          ? "rgba(18, 199, 156, 0.32)"
+          : "rgba(155, 230, 214, 0.46)";
+      drawRoundRect(ctx, x1, y - 6, width, 12, 6);
+      ctx.fill();
+      if (isActive) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "rgba(18, 199, 156, 0.94)";
+        ctx.lineWidth = 2;
+        drawRoundRect(ctx, x1, y - 7, width, 14, 7);
+        ctx.stroke();
+      }
+    });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function lyricWordMidi(segment, contour, notes) {
+    const points = (contour || [])
+      .filter((point) => {
+        const time = Number(point.time);
+        const midi = Number(point.midi);
+        return Number.isFinite(time) && Number.isFinite(midi) && time >= segment.start && time <= segment.end;
+      })
+      .map((point) => Number(point.midi))
+      .sort((a, b) => a - b);
+    if (points.length) return points[Math.floor(points.length / 2)];
+
+    let bestNote = null;
+    let bestOverlap = 0;
+    (notes || []).forEach((note) => {
+      const start = Number(note.start);
+      const end = Number(note.end);
+      const midi = Number(note.midi);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(midi)) return;
+      const overlap = Math.max(0, Math.min(end, segment.end) - Math.max(start, segment.start));
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestNote = midi;
+      }
+    });
+    return bestNote;
   }
 
   function visibleRoadNotes(notes, minTime, maxTime) {
@@ -2583,7 +2774,7 @@
     const minTime = songTime - Math.max(STAGE_ROAD_TRAIL_SECONDS, hitX / pixelsPerSecond);
     const maxTime = songTime + lookaheadSeconds;
     const xForTime = (time) => hitX + (time - songTime) * pixelsPerSecond;
-    const range = songRoadMidiRange(songTime);
+    const range = songRoadMidiRange(songTime, minTime, maxTime);
     const span = Math.max(1, range.maxMidi - range.minMidi);
     const layout = songRoadLayout(width, height);
     layout.width = width;
@@ -2599,10 +2790,14 @@
     ctx.fillStyle = backdrop;
     ctx.fillRect(0, 0, width, height);
 
-    if (selectedMode() !== "song" || (notes.length === 0 && contour.length === 0)) {
+    const hasPitchRoad = notes.length > 0 || contour.length > 0;
+    if (selectedMode() !== "song") {
       drawRoadMessage(ctx, width, height, state.songGuideLoading ? TEXT.loadingGuide : TEXT.noGuide);
       ctx.restore();
       return;
+    }
+    if (!hasPitchRoad) {
+      drawRoadMessage(ctx, width, height, state.songGuideLoading ? TEXT.loadingGuide : TEXT.noGuide);
     }
 
     for (let i = 0; i <= Math.ceil(lookaheadSeconds) + 2; i++) {
@@ -2614,6 +2809,10 @@
       ctx.lineTo(x, layout.railY + 20);
       ctx.stroke();
     }
+
+    const lyricSegments = visibleLyricSegments(minTime, maxTime);
+    const wordSegments = lyricSegments.filter((segment) => segment.unitType === "word");
+    drawLyricWordTimingBands(ctx, wordSegments, xForTime, layout, songTime);
 
     for (let midi = Math.floor(range.minMidi); midi <= Math.ceil(range.maxMidi); midi++) {
       const y = yForMidi(midi);
@@ -2633,6 +2832,7 @@
 
     const visibleNotes = visibleRoadNotes(notes, minTime, maxTime);
     const visibleContour = visibleRoadContour(contour, minTime, maxTime);
+    drawLyricWordPitchBars(ctx, wordSegments, visibleContour, visibleNotes, xForTime, yForMidi, layout, songTime);
     if (visibleContour.length > 0) {
       drawTargetContourTiles(ctx, visibleContour, xForTime, yForMidi, layout, songTime);
     } else {
