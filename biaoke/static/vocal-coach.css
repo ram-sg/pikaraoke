@@ -466,6 +466,10 @@ body {
   pointer-events: none;
 }
 
+.coach-video-container.has-fixed-lyrics .coach-lyrics {
+  display: block;
+}
+
 .coach-lyrics-status {
   position: absolute;
   right: 14px;

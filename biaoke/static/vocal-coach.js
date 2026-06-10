@@ -38,6 +38,7 @@
   const VOCAL_REFERENCE_VOLUME = 0.48;
   const VOCAL_REFERENCE_SYNC_DRIFT_SECONDS = 0.75;
   const VOCAL_REFERENCE_SYNC_INTERVAL_MS = 850;
+  const FIXED_LYRICS_STORAGE_KEY = "biaoke-coach-fixed-lyrics";
   const CONFIG = window.BiaokeCoachConfig || {};
 
   const TEXT = {
@@ -155,6 +156,13 @@
     vocalReferenceAvailable: false,
     vocalReferenceKey: null,
     vocalReferenceLastSyncAt: 0,
+    fixedLyricsEnabled: false,
+    lyricPhrasesCacheKey: null,
+    lyricPhrasesCache: null,
+    lyricLaneCacheKey: null,
+    lyricLaneCache: null,
+    lyricVisualCacheKey: null,
+    lyricVisualIntervals: null,
   };
 
   const els = {};
@@ -218,6 +226,7 @@
       "coach-lyrics-offset",
       "coach-reference-toggle",
       "coach-reference-audio",
+      "coach-fixed-lyrics-toggle",
     ].forEach((id) => {
       els[id] = document.getElementById(id);
     });
@@ -366,6 +375,26 @@
     if (!toggle) return;
     toggle.disabled = !state.vocalReferenceAvailable;
     toggle.checked = Boolean(state.vocalReferenceEnabled);
+  }
+
+  function loadFixedLyricsPreference() {
+    try {
+      state.fixedLyricsEnabled = localStorage.getItem(FIXED_LYRICS_STORAGE_KEY) === "1";
+    } catch (_error) {
+      state.fixedLyricsEnabled = false;
+    }
+  }
+
+  function persistFixedLyricsPreference() {
+    try {
+      localStorage.setItem(FIXED_LYRICS_STORAGE_KEY, state.fixedLyricsEnabled ? "1" : "0");
+    } catch (_error) {}
+  }
+
+  function updateFixedLyricsControl() {
+    const toggle = els["coach-fixed-lyrics-toggle"];
+    if (toggle) toggle.checked = Boolean(state.fixedLyricsEnabled);
+    els["coach-video-container"]?.classList.toggle("has-fixed-lyrics", Boolean(state.fixedLyricsEnabled));
   }
 
   function setVocalReferenceAvailable(available) {
@@ -977,15 +1006,16 @@
     return lyrics.sort((a, b) => a.start - b.start);
   }
 
-  function renderLyricLine(container, line, time) {
+  function renderLyricLine(container, line, time, lineIndex = null) {
     container.replaceChildren();
     if (!line) return;
     const hasPreciseTiming =
       state.lyricsHaveKaraokeTiming && (line.has_karaoke_timing !== false);
     const segments =
-      hasPreciseTiming && line.segments?.length
+      lyricPaintSegmentsForLine(lineIndex) ||
+      (hasPreciseTiming && line.segments?.length
         ? line.segments
-        : [{ text: line.text, start: line.start, end: line.end }];
+        : [{ text: line.text, start: line.start, end: line.end }]);
     for (const segment of segments) {
       const token = document.createElement("span");
       token.className = "coach-lyric-token";
@@ -999,6 +1029,19 @@
       }
       container.appendChild(token);
     }
+  }
+
+  function lyricPaintSegmentsForLine(lineIndex) {
+    if (!Number.isFinite(Number(lineIndex))) return null;
+    const offset = Number(state.lyricsOffsetSeconds || 0);
+    const segments = normalizedLyricPaintUnits()
+      .filter((unit) => unit.unitType === "word" && Number(unit.lineIndex) === Number(lineIndex))
+      .map((unit, index, units) => ({
+        text: `${unit.text}${index < units.length - 1 ? " " : ""}`,
+        start: unit.start - offset,
+        end: unit.end - offset,
+      }));
+    return segments.length ? segments : null;
   }
 
   function setLyricsStatus(text, tone = "") {
@@ -1141,14 +1184,14 @@
     if (activeIndex < 0) {
       if (firstLine && lyricTime < firstLine.start) {
         setLyricsStatus(TEXT.lyricsReady, "is-ready");
-        renderLyricLine(els["coach-lyrics-current"], firstLine, firstLine.start);
+        renderLyricLine(els["coach-lyrics-current"], firstLine, firstLine.start, 0);
         els["coach-lyrics-next"].textContent = state.lyrics[1]?.text || "";
         state.activeLyricIndex = 0;
         return;
       }
       if (lastLine && lyricTime > lastLine.end) {
         setLyricsStatus(TEXT.lyricsReady, "is-ready");
-        renderLyricLine(els["coach-lyrics-current"], lastLine, lastLine.end);
+        renderLyricLine(els["coach-lyrics-current"], lastLine, lastLine.end, state.lyrics.length - 1);
         els["coach-lyrics-next"].textContent = "";
         state.activeLyricIndex = state.lyrics.length - 1;
         return;
@@ -1156,7 +1199,12 @@
       activeIndex = state.lyrics.findIndex((line) => line.start > lyricTime);
       if (activeIndex >= 0) {
         setLyricsStatus(TEXT.lyricsReady, "is-ready");
-        renderLyricLine(els["coach-lyrics-current"], state.lyrics[activeIndex], state.lyrics[activeIndex].start);
+        renderLyricLine(
+          els["coach-lyrics-current"],
+          state.lyrics[activeIndex],
+          state.lyrics[activeIndex].start,
+          activeIndex,
+        );
         els["coach-lyrics-next"].textContent = state.lyrics[activeIndex + 1]?.text || "";
         state.activeLyricIndex = activeIndex;
       }
@@ -1165,7 +1213,7 @@
 
     const active = state.lyrics[activeIndex];
     setLyricsStatus(TEXT.lyricsReady, "is-ready");
-    renderLyricLine(els["coach-lyrics-current"], active, lyricTime);
+    renderLyricLine(els["coach-lyrics-current"], active, lyricTime, activeIndex);
     els["coach-lyrics-next"].textContent = state.lyrics[activeIndex + 1]?.text || "";
     state.activeLyricIndex = activeIndex;
   }
@@ -2138,14 +2186,30 @@
     }
   }
 
-  function visibleLyricPhrases(minTime, maxTime) {
+  function lyricContentCacheKey() {
+    const firstLine = state.lyrics[0];
+    const lastLine = state.lyrics[state.lyrics.length - 1];
+    return [
+      state.currentLyricsKey || state.currentSubtitleUrl || state.nowPlaying.now_playing_url || "",
+      state.lyrics.length,
+      state.lyricPaintUnits.length,
+      Number(state.lyricsOffsetSeconds || 0).toFixed(3),
+      Number(firstLine?.start ?? 0).toFixed(3),
+      Number(lastLine?.end ?? 0).toFixed(3),
+    ].join("|");
+  }
+
+  function lyricPhrases() {
+    const cacheKey = lyricContentCacheKey();
+    if (state.lyricPhrasesCacheKey === cacheKey && state.lyricPhrasesCache) return state.lyricPhrasesCache;
+
     const groups = new Map();
     lyricWordTimelineSegments().forEach((segment) => {
       if (!groups.has(segment.lineIndex)) groups.set(segment.lineIndex, []);
       groups.get(segment.lineIndex).push(segment);
     });
 
-    return Array.from(groups.entries())
+    const phrases = Array.from(groups.entries())
       .map(([lineIndex, words]) => {
         const sortedWords = words.sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
         return {
@@ -2156,8 +2220,170 @@
           text: sortedWords.map((word) => word.text).join(" "),
         };
       })
-      .filter((phrase) => phrase.end >= minTime - 1.2 && phrase.start <= maxTime + 1.2)
       .sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex);
+    state.lyricPhrasesCacheKey = cacheKey;
+    state.lyricPhrasesCache = phrases;
+    return phrases;
+  }
+
+  function visibleLyricPhrases(minTime, maxTime) {
+    return lyricPhrases().filter((phrase) => phrase.end >= minTime - 1.2 && phrase.start <= maxTime + 1.2);
+  }
+
+  function fixedRoadTimeScale(width, songTime, notes) {
+    const lookaheadSeconds = songRoadLookaheadSeconds(songTime, notes);
+    const hitX = width * STAGE_ROAD_HIT_X;
+    const pixelsPerSecond = (width - hitX) / lookaheadSeconds;
+    return {
+      mode: "fixed",
+      hitX,
+      lookaheadSeconds,
+      pixelsPerSecond,
+      minTime: songTime - Math.max(STAGE_ROAD_TRAIL_SECONDS, hitX / pixelsPerSecond),
+      maxTime: songTime + lookaheadSeconds,
+      xForTime: (time) => hitX + (time - songTime) * pixelsPerSecond,
+    };
+  }
+
+  function lyricAwareRoadTimeScale(ctx, width, songTime, notes) {
+    const fallback = fixedRoadTimeScale(width, songTime, notes);
+    const words = lyricWordTimelineSegments();
+    if (!words.length) return fallback;
+
+    const intervals = lyricVisualIntervals(ctx, words, fallback.pixelsPerSecond);
+    if (!intervals.length) return fallback;
+
+    const currentVisual = visualPositionAtTime(songTime, intervals, fallback.pixelsPerSecond);
+    const minVisual = currentVisual - fallback.hitX - 160;
+    const maxVisual = currentVisual + (width - fallback.hitX) + 220;
+    return {
+      mode: "lyric",
+      hitX: fallback.hitX,
+      lookaheadSeconds: fallback.lookaheadSeconds,
+      pixelsPerSecond: fallback.pixelsPerSecond,
+      minTime: timeAtVisualPosition(minVisual, intervals, fallback.pixelsPerSecond),
+      maxTime: timeAtVisualPosition(maxVisual, intervals, fallback.pixelsPerSecond),
+      xForTime: (time) =>
+        fallback.hitX + visualPositionAtTime(time, intervals, fallback.pixelsPerSecond) - currentVisual,
+    };
+  }
+
+  function lyricVisualIntervals(ctx, words, pixelsPerSecond) {
+    const cacheKey = `${lyricContentCacheKey()}|${Math.round(pixelsPerSecond * 100)}`;
+    if (state.lyricVisualCacheKey === cacheKey && state.lyricVisualIntervals) return state.lyricVisualIntervals;
+    const intervals = buildLyricVisualIntervals(ctx, words, pixelsPerSecond);
+    state.lyricVisualCacheKey = cacheKey;
+    state.lyricVisualIntervals = intervals;
+    return intervals;
+  }
+
+  function buildLyricVisualIntervals(ctx, words, pixelsPerSecond) {
+    const intervals = [];
+    let cursor = 0;
+    let previous = null;
+    ctx.save();
+    ctx.font = "900 23px sans-serif";
+
+    words.forEach((word) => {
+      const start = Number(word.start);
+      const end = Number(word.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+
+      if (previous) {
+        const gapSeconds = Math.max(0, start - previous.end);
+        if (gapSeconds > 0.04) {
+          cursor += clamp(gapSeconds * pixelsPerSecond * 0.46, 8, 92);
+          if (word.lineIndex !== previous.lineIndex) cursor += 18;
+        }
+      }
+
+      const textWidth = ctx.measureText(word.text).width;
+      const durationWidth = (end - start) * pixelsPerSecond * 0.92;
+      const minimumWidth = clamp(textWidth + 24, 44, 240);
+      const visualWidth = Math.max(durationWidth, minimumWidth);
+      intervals.push({
+        ...word,
+        visualStart: cursor,
+        visualEnd: cursor + visualWidth,
+      });
+      cursor += visualWidth;
+      previous = word;
+    });
+
+    ctx.restore();
+    return intervals;
+  }
+
+  function visualPositionAtTime(time, intervals, pixelsPerSecond) {
+    if (!intervals.length) return time * pixelsPerSecond;
+    const first = intervals[0];
+    if (time <= first.start) return first.visualStart + (time - first.start) * pixelsPerSecond * 0.46;
+
+    let low = 0;
+    let high = intervals.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const current = intervals[mid];
+      if (time < current.start) {
+        high = mid - 1;
+      } else if (time > current.end) {
+        low = mid + 1;
+      } else {
+        const progress = clamp((time - current.start) / Math.max(0.08, current.end - current.start), 0, 1);
+        return current.visualStart + (current.visualEnd - current.visualStart) * progress;
+      }
+    }
+
+    const previous = intervals[high] || null;
+    const next = intervals[low] || null;
+    if (previous && next) {
+      const progress = clamp((time - previous.end) / Math.max(0.08, next.start - previous.end), 0, 1);
+      return previous.visualEnd + (next.visualStart - previous.visualEnd) * progress;
+    }
+
+    const last = intervals[intervals.length - 1];
+    return last.visualEnd + (time - last.end) * pixelsPerSecond * 0.46;
+  }
+
+  function timeAtVisualPosition(visualPosition, intervals, pixelsPerSecond) {
+    if (!intervals.length) return visualPosition / pixelsPerSecond;
+    const first = intervals[0];
+    if (visualPosition <= first.visualStart) {
+      return first.start + (visualPosition - first.visualStart) / Math.max(1, pixelsPerSecond * 0.46);
+    }
+
+    let low = 0;
+    let high = intervals.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const current = intervals[mid];
+      if (visualPosition < current.visualStart) {
+        high = mid - 1;
+      } else if (visualPosition > current.visualEnd) {
+        low = mid + 1;
+      } else {
+        const progress = clamp(
+          (visualPosition - current.visualStart) / Math.max(1, current.visualEnd - current.visualStart),
+          0,
+          1,
+        );
+        return current.start + (current.end - current.start) * progress;
+      }
+    }
+
+    const previous = intervals[high] || null;
+    const next = intervals[low] || null;
+    if (previous && next) {
+      const progress = clamp(
+        (visualPosition - previous.visualEnd) / Math.max(1, next.visualStart - previous.visualEnd),
+        0,
+        1,
+      );
+      return previous.end + (next.start - previous.end) * progress;
+    }
+
+    const last = intervals[intervals.length - 1];
+    return last.end + (visualPosition - last.visualEnd) / Math.max(1, pixelsPerSecond * 0.46);
   }
 
   function lyricFontForWidth(ctx, text, maxWidth, baseSize = 34, minSize = 18) {
@@ -2215,13 +2441,13 @@
       .filter(Boolean);
   }
 
-  function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY) {
+  function drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY, contour = [], notes = []) {
     if (!phrases.length) return false;
 
-    const laneHeight = 31;
+    const laneHeight = 28;
     const laneCount = 4;
-    const lanes = Array.from({ length: laneCount }, (_, index) => ({ index, right: -Infinity }));
-    const laneGap = 18;
+    const pitchRange = vocalMidiRange(contour, notes);
+    const phraseLanes = cachedLyricPhraseLanes(contour, notes, pitchRange, laneCount);
     ctx.save();
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -2232,7 +2458,7 @@
     phrases.forEach((phrase) => {
       const isActive = songTime >= phrase.start && songTime <= phrase.end;
       const isDone = songTime > phrase.end;
-      const fontSize = isActive ? 25 : 22;
+      const fontSize = 22;
       ctx.font = `900 ${fontSize}px sans-serif`;
       const layouts = phraseWordLayouts(ctx, phrase.words, fontSize);
       const textWidth = layouts.totalWidth;
@@ -2243,14 +2469,8 @@
       const visualX = timeCenter - visualWidth / 2;
       if (visualX > width + 120 || visualX + visualWidth < -120) return;
 
-      let lane = lanes.find((candidate) => visualX >= candidate.right + laneGap);
-      if (!lane) {
-        lane = lanes.reduce((best, candidate) => (candidate.right < best.right ? candidate : best), lanes[0]);
-        if (!isActive && visualX < lane.right + laneGap) return;
-      }
-      lane.right = Math.max(lane.right, visualX + visualWidth);
-
-      const y = textY + lane.index * laneHeight;
+      const laneIndex = phraseLanes.get(phrase.lineIndex) ?? phrasePitchLane(phrase, contour, notes, pitchRange, laneCount);
+      const y = textY + laneIndex * laneHeight;
       ctx.globalAlpha = phrase.words.every((word) => word.estimated) ? 0.72 : 1;
       ctx.fillStyle = isActive
         ? "rgba(237, 176, 73, 0.18)"
@@ -2288,6 +2508,100 @@
     return true;
   }
 
+  function cachedLyricPhraseLanes(contour, notes, pitchRange, laneCount) {
+    const cacheKey = [
+      lyricContentCacheKey(),
+      contour.length,
+      notes.length,
+      laneCount,
+      Math.round(pitchRange.minMidi * 10),
+      Math.round(pitchRange.maxMidi * 10),
+    ].join("|");
+    if (state.lyricLaneCacheKey === cacheKey && state.lyricLaneCache) return state.lyricLaneCache;
+    const lanes = assignLyricPhraseLanes(lyricPhrases(), contour, notes, pitchRange, laneCount);
+    state.lyricLaneCacheKey = cacheKey;
+    state.lyricLaneCache = lanes;
+    return lanes;
+  }
+
+  function assignLyricPhraseLanes(phrases, contour, notes, pitchRange, laneCount) {
+    const assignments = new Map();
+    let previous = null;
+    const laneAvailableAt = Array.from({ length: laneCount }, () => -Infinity);
+    const laneGapSeconds = 1.15;
+    [...phrases]
+      .sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex)
+      .forEach((phrase) => {
+        const preferredLane = phrasePitchLane(phrase, contour, notes, pitchRange, laneCount);
+        const blockedLane =
+          previous && Number(phrase.lineIndex) === Number(previous.lineIndex) + 1 ? previous.lane : null;
+        const lane = chooseStableLyricLane(preferredLane, blockedLane, phrase, laneAvailableAt, laneGapSeconds);
+        assignments.set(phrase.lineIndex, lane);
+        laneAvailableAt[lane] = Math.max(laneAvailableAt[lane], Number(phrase.end) + laneGapSeconds);
+        previous = { lineIndex: Number(phrase.lineIndex), lane };
+      });
+    return assignments;
+  }
+
+  function chooseStableLyricLane(preferredLane, blockedLane, phrase, laneAvailableAt, laneGapSeconds) {
+    const candidates = lyricLaneCandidates(preferredLane, laneAvailableAt.length);
+    const start = Number(phrase.start);
+    const openLane = candidates.find(
+      (lane) => lane !== blockedLane && start >= laneAvailableAt[lane] - laneGapSeconds * 0.2,
+    );
+    if (Number.isFinite(openLane)) return openLane;
+    const unblockedLane = candidates.find((lane) => lane !== blockedLane);
+    return Number.isFinite(unblockedLane) ? unblockedLane : preferredLane;
+  }
+
+  function lyricLaneCandidates(preferredLane, laneCount) {
+    return Array.from({ length: laneCount }, (_, lane) => lane).sort(
+      (a, b) => Math.abs(a - preferredLane) - Math.abs(b - preferredLane) || a - b,
+    );
+  }
+
+  function vocalMidiRange(contour, notes) {
+    const values = [];
+    (contour || []).forEach((point) => {
+      const midi = Number(point.midi);
+      const confidence = Number(point.confidence ?? 1);
+      if (Number.isFinite(midi) && confidence >= REFERENCE_CONTOUR_MIN_CONFIDENCE) values.push(midi);
+    });
+    (notes || []).forEach((note) => {
+      const midi = Number(note.midi);
+      if (Number.isFinite(midi)) values.push(midi);
+    });
+    if (!values.length) return { minMidi: 48, maxMidi: 72 };
+    let minMidi = Math.floor(Math.min(...values)) - 1;
+    let maxMidi = Math.ceil(Math.max(...values)) + 1;
+    const span = maxMidi - minMidi;
+    if (span < 10) {
+      const pad = (10 - span) / 2;
+      minMidi -= pad;
+      maxMidi += pad;
+    }
+    return { minMidi, maxMidi };
+  }
+
+  function phrasePitchLane(phrase, contour, notes, pitchRange, laneCount) {
+    const midi = phraseMidi(phrase, contour, notes);
+    if (!Number.isFinite(midi)) return Math.abs(Number(phrase.lineIndex) || 0) % laneCount;
+    const span = Math.max(1, pitchRange.maxMidi - pitchRange.minMidi);
+    const normalized = clamp((midi - pitchRange.minMidi) / span, 0, 0.999);
+    return laneCount - 1 - Math.floor(normalized * laneCount);
+  }
+
+  function phraseMidi(phrase, contour, notes) {
+    const values = [];
+    (phrase.words || []).forEach((word) => {
+      const midi = lyricWordMidi(word, contour, notes);
+      if (Number.isFinite(midi)) values.push(midi);
+    });
+    if (!values.length) return null;
+    values.sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
+  }
+
   function phraseWordLayouts(ctx, words, fontSize) {
     const spaceWidth = Math.max(fontSize * 0.36, ctx.measureText(" ").width);
     const items = [];
@@ -2301,7 +2615,7 @@
     return { items, totalWidth };
   }
 
-  function drawStageLyricRail(ctx, width, xForTime, songTime, railY, minTime, maxTime, hitX) {
+  function drawStageLyricRail(ctx, width, xForTime, songTime, railY, minTime, maxTime, hitX, contour = [], notes = []) {
     if (!state.lyrics.length) return;
 
     const phrases = visibleLyricPhrases(minTime, maxTime);
@@ -2309,14 +2623,15 @@
     if (segments.length === 0 && phrases.length === 0) return;
     const wordSegments = segments.filter((segment) => segment.unitType === "word");
     const hasWordSegments = wordSegments.length > 0;
+    const fixedLyrics = Boolean(state.fixedLyricsEnabled);
 
     const railH = 10;
     const railTop = railY - 13;
-    const textY = railY + (hasWordSegments ? 28 : 20);
+    const textY = railY + (hasWordSegments ? 24 : 20);
 
     ctx.save();
     ctx.fillStyle = "rgba(3, 6, 10, 0.46)";
-    drawRoundRect(ctx, 0, railTop - 16, width, hasWordSegments ? 138 : 78, 0);
+    drawRoundRect(ctx, 0, railTop - 16, width, fixedLyrics ? 44 : hasWordSegments ? 154 : 78, 0);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(246, 243, 234, 0.14)";
@@ -2350,13 +2665,13 @@
         ctx.fill();
       }
 
-      if (!hasWordSegments) {
+      if (!hasWordSegments && !fixedLyrics) {
         drawLyricSegmentText(ctx, segment, x1, x2, textY, songTime, hitX, width);
       }
     });
 
-    if (hasWordSegments) {
-      drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8);
+    if (hasWordSegments && !fixedLyrics) {
+      drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8, contour, notes);
     }
 
     ctx.fillStyle = "rgba(246, 243, 234, 0.72)";
@@ -2768,12 +3083,8 @@
     const songTime = songPlaybackTime(now);
     const notes = songGuideNotes();
     const contour = songGuideContour();
-    const lookaheadSeconds = songRoadLookaheadSeconds(songTime, notes);
-    const hitX = width * STAGE_ROAD_HIT_X;
-    const pixelsPerSecond = (width - hitX) / lookaheadSeconds;
-    const minTime = songTime - Math.max(STAGE_ROAD_TRAIL_SECONDS, hitX / pixelsPerSecond);
-    const maxTime = songTime + lookaheadSeconds;
-    const xForTime = (time) => hitX + (time - songTime) * pixelsPerSecond;
+    const timeScale = lyricAwareRoadTimeScale(ctx, width, songTime, notes);
+    const { hitX, minTime, maxTime, xForTime } = timeScale;
     const range = songRoadMidiRange(songTime, minTime, maxTime);
     const span = Math.max(1, range.maxMidi - range.minMidi);
     const layout = songRoadLayout(width, height);
@@ -2800,10 +3111,10 @@
       drawRoadMessage(ctx, width, height, state.songGuideLoading ? TEXT.loadingGuide : TEXT.noGuide);
     }
 
-    for (let i = 0; i <= Math.ceil(lookaheadSeconds) + 2; i++) {
-      const x = xForTime(Math.floor(songTime) + i);
+    for (let second = Math.floor(minTime); second <= Math.ceil(maxTime); second++) {
+      const x = xForTime(second);
       if (x < 0 || x > width) continue;
-      ctx.strokeStyle = i % 2 === 0 ? "rgba(246, 243, 234, 0.055)" : "rgba(246, 243, 234, 0.022)";
+      ctx.strokeStyle = second % 2 === 0 ? "rgba(246, 243, 234, 0.055)" : "rgba(246, 243, 234, 0.022)";
       ctx.beginPath();
       ctx.moveTo(x, layout.roadTop);
       ctx.lineTo(x, layout.railY + 20);
@@ -2873,7 +3184,7 @@
       ctx.stroke();
     }
 
-    drawStageLyricRail(ctx, width, xForTime, songTime, layout.railY, minTime, maxTime, hitX);
+    drawStageLyricRail(ctx, width, xForTime, songTime, layout.railY, minTime, maxTime, hitX, contour, notes);
     ctx.restore();
   }
 
@@ -3193,6 +3504,13 @@
       }
       playVocalReferenceAudio();
     });
+    els["coach-fixed-lyrics-toggle"].addEventListener("change", () => {
+      state.fixedLyricsEnabled = Boolean(els["coach-fixed-lyrics-toggle"].checked);
+      persistFixedLyricsPreference();
+      updateFixedLyricsControl();
+      updateLyrics(getVideoPlayer().currentTime || 0);
+      drawStageSongRoad(performance.now(), currentTarget(performance.now()), state.latestPitchMidi);
+    });
     els["coach-preset"].addEventListener("change", async () => {
       resetSession();
       stopSongSync();
@@ -3218,6 +3536,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     bindElements();
+    loadFixedLyricsPreference();
     setupEvents();
     setupVideoEvents();
     setupPlaybackSocket();
@@ -3226,6 +3545,7 @@
     resetSession();
     setLyricsOffsetDisplay();
     updateVocalReferenceControl();
+    updateFixedLyricsControl();
     updateReadout({ voiced: false }, null, null, 0);
     draw(performance.now(), null, null);
     drawStageSongRoad(performance.now(), null, null);
