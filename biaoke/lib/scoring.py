@@ -18,14 +18,16 @@ DEFAULT_MAX_ANALYSIS_SECONDS = 90
 FRAME_SECONDS = 0.04
 HOP_SECONDS = 0.05
 MIN_SINGING_FREQUENCY = 70
-MAX_SINGING_FREQUENCY = 700
+MAX_SINGING_FREQUENCY = 1100
 DEFAULT_MAX_MELODY_SECONDS = 360
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 MELODY_MIN_MIDI = 36
-MELODY_MAX_MIDI = 84
+MELODY_MAX_MIDI = 96
 MELODY_CONTOUR_MIN_CONFIDENCE = 0.38
 MELODY_CONTOUR_MIN_GAP_SECONDS = 0.09
 MELODY_CONTOUR_SMOOTH_WINDOW_SECONDS = 0.16
+MELODY_LOCAL_CLUSTER_SEMITONES = 1.35
+MELODY_LOCAL_CLUSTER_MIN_POINTS = 2
 
 
 class ScoreAnalysisError(Exception):
@@ -471,7 +473,7 @@ def _score_pitch_frames(
 
 
 def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, float | int | str]]:
-    min_segment_seconds = 0.16
+    min_segment_seconds = 0.12
     max_merge_gap_seconds = 0.36
     raw_segments: list[dict[str, float | int | str]] = []
     active_note = None
@@ -540,7 +542,7 @@ def _pitch_frames_to_melody_notes(frames: list[PitchFrame]) -> list[dict[str, fl
         else:
             merged.append(segment)
 
-    return [segment for segment in merged if float(segment["end"]) - float(segment["start"]) >= 0.2]
+    return [segment for segment in merged if float(segment["end"]) - float(segment["start"]) >= 0.12]
 
 
 def _pitch_frames_to_melody_contour(frames: list[PitchFrame]) -> list[dict[str, float]]:
@@ -595,6 +597,21 @@ def _pitch_frames_to_smoothed_midi_timeline(
             and abs(float(neighbor["time"]) - float(point["time"]))
             <= MELODY_CONTOUR_SMOOTH_WINDOW_SECONDS
         ]
+        local_cluster = [
+            neighbor
+            for neighbor in neighbor_points
+            if abs(float(neighbor["midi"]) - midi) <= MELODY_LOCAL_CLUSTER_SEMITONES
+        ]
+        if len(local_cluster) >= MELODY_LOCAL_CLUSTER_MIN_POINTS:
+            values = []
+            weights = []
+            for neighbor in local_cluster:
+                weight = max(0.05, float(neighbor["confidence"]))
+                values.append(float(neighbor["midi"]) * weight)
+                weights.append(weight)
+            smoothed.append({**point, "midi": sum(values) / sum(weights)})
+            continue
+
         reference_midi = midi
         if len(neighbor_points) >= 3:
             median_midi = statistics.median(float(neighbor["midi"]) for neighbor in neighbor_points)

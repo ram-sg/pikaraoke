@@ -116,7 +116,7 @@ def test_prepare_review_ai_route_reviews_track():
     mock_karaoke.coach_preparation.review_track_with_ai.return_value = {
         "track": {"id": 7, "status": "ready"},
         "job": {"id": 9, "stage": "ai_review"},
-        "review": {"model": "deepseek-v4-flash"},
+        "review": {"model": "deepseek-v4-pro"},
     }
 
     with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
@@ -127,6 +127,27 @@ def test_prepare_review_ai_route_reviews_track():
     assert data["status"] == "ok"
     assert data["message"] == "Revisao por IA concluida."
     mock_karaoke.coach_preparation.review_track_with_ai.assert_called_once_with(7)
+
+
+def test_prepare_revert_ai_route_restores_track():
+    app = Flask(__name__)
+    app.register_blueprint(prepare_bp)
+    client = app.test_client()
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.coach_preparation.revert_ai_review.return_value = {
+        "track": {"id": 7, "status": "needs_review"},
+        "job": {"id": 10, "stage": "ai_revert"},
+    }
+
+    with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
+        response = client.post("/prepare/revert-ai", json={"track_id": 7})
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data["status"] == "ok"
+    assert data["message"] == "Revisao por IA revertida."
+    mock_karaoke.coach_preparation.revert_ai_review.assert_called_once_with(7)
 
 
 def test_prepare_delete_route_removes_track():

@@ -82,6 +82,20 @@ def test_extracts_melody_guide_from_pitched_audio(tmp_path):
     assert any(59.5 <= point["midi"] <= 60.5 for point in guide["contour"])
 
 
+def test_extracts_high_melody_guide_from_pitched_audio(tmp_path):
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed on this host")
+
+    path = tmp_path / "high-tone.wav"
+    write_wav(path, sine_wave(880.0, 2.0))
+
+    guide = extract_melody_guide_from_media(path, prefer_torchcrepe=False, max_seconds=5)
+
+    assert guide["status"] == "ready"
+    assert any(80 <= note["midi"] <= 82 for note in guide["notes"])
+    assert any(80.5 <= point["midi"] <= 81.5 for point in guide["contour"])
+
+
 def test_melody_contour_rejects_isolated_pitch_spikes():
     frames = [
         PitchFrame(0.00, midi_to_frequency(60), 0.9, 0.4),
@@ -97,3 +111,21 @@ def test_melody_contour_rejects_isolated_pitch_spikes():
     assert contour
     assert all(point["midi"] < 61 for point in contour)
     assert {note["midi"] for note in notes} == {60}
+
+
+def test_melody_contour_preserves_short_sustained_high_notes():
+    frames = [
+        PitchFrame(0.00, midi_to_frequency(60), 0.9, 0.4),
+        PitchFrame(0.05, midi_to_frequency(60.1), 0.9, 0.4),
+        PitchFrame(0.10, midi_to_frequency(72), 0.9, 0.4),
+        PitchFrame(0.15, midi_to_frequency(72.1), 0.9, 0.4),
+        PitchFrame(0.20, midi_to_frequency(72.05), 0.9, 0.4),
+        PitchFrame(0.25, midi_to_frequency(60.05), 0.9, 0.4),
+        PitchFrame(0.30, midi_to_frequency(60), 0.9, 0.4),
+    ]
+
+    contour = _pitch_frames_to_melody_contour(frames)
+    notes = _pitch_frames_to_melody_notes(frames)
+
+    assert any(point["midi"] > 71 for point in contour)
+    assert 72 in {note["midi"] for note in notes}

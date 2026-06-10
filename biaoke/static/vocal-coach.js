@@ -26,10 +26,10 @@
   const VISUAL_ARTIFACT_CONFIDENCE = 0.82;
   const DEFAULT_PITCH_BANDS_CENTS = [25, 40, 60, 80, 100, 130, 160, 200, 250, 320];
   const PITCH_BAND_STYLES = [
-    { cents: 320, fill: "rgba(207, 77, 67, 0.045)" },
-    { cents: 200, fill: "rgba(237, 176, 73, 0.065)" },
-    { cents: 100, fill: "rgba(155, 230, 214, 0.09)" },
-    { cents: 40, fill: "rgba(18, 199, 156, 0.15)" },
+    { cents: 320, fill: "rgba(207, 77, 67, 0.003)" },
+    { cents: 200, fill: "rgba(237, 176, 73, 0.004)" },
+    { cents: 100, fill: "rgba(155, 230, 214, 0.006)" },
+    { cents: 40, fill: "rgba(18, 199, 156, 0.009)" },
   ];
   const MAX_CENTS_FOR_SCORE = 90;
   const GOOD_CENTS = 35;
@@ -1038,9 +1038,9 @@
     if (!Number.isFinite(Number(lineIndex))) return null;
     const offset = Number(state.lyricsOffsetSeconds || 0);
     const segments = normalizedLyricPaintUnits()
-      .filter((unit) => unit.unitType === "word" && Number(unit.lineIndex) === Number(lineIndex))
+      .filter((unit) => unit.unitType !== "line" && Number(unit.lineIndex) === Number(lineIndex))
       .map((unit, index, units) => ({
-        text: `${unit.text}${index < units.length - 1 ? " " : ""}`,
+        text: `${unit.text}${unit.unitType === "word" && index < units.length - 1 ? " " : ""}`,
         start: unit.start - offset,
         end: unit.end - offset,
       }));
@@ -2060,8 +2060,8 @@
   }
 
   function visibleLyricSegments(minTime, maxTime) {
-    const wordTimeline = lyricWordTimelineSegments();
-    if (wordTimeline.length > 0) return wordTimeline.filter((unit) => unit.end >= minTime && unit.start <= maxTime);
+    const paintTimeline = lyricPaintTimelineSegments();
+    if (paintTimeline.length > 0) return paintTimeline.filter((unit) => unit.end >= minTime && unit.start <= maxTime);
 
     const offset = Number(state.lyricsOffsetSeconds || 0);
     const segments = [];
@@ -2088,6 +2088,7 @@
             lineIndex,
             segmentIndex: 0,
             precision: "line",
+            unitType: "line",
           });
         }
         return;
@@ -2107,10 +2108,25 @@
           lineIndex,
           segmentIndex,
           precision: "karaoke",
+          unitType: "segment",
         });
       });
     });
     return segments.sort((a, b) => a.start - b.start || a.segmentIndex - b.segmentIndex);
+  }
+
+  function lyricPaintTimelineSegments() {
+    const paintUnits = normalizedLyricPaintUnits()
+      .filter((unit) => unit.unitType !== "line")
+      .map((unit, index) => ({
+        ...unit,
+        segmentIndex: Number.isFinite(unit.segmentIndex) ? unit.segmentIndex : index,
+        estimated: false,
+      }));
+    if (paintUnits.length > 0) {
+      return paintUnits.sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex || a.segmentIndex - b.segmentIndex);
+    }
+    return lyricWordTimelineSegments();
   }
 
   function lyricWordTimelineSegments() {
@@ -2160,6 +2176,10 @@
     return segments.sort((a, b) => a.start - b.start || a.lineIndex - b.lineIndex || a.segmentIndex - b.segmentIndex);
   }
 
+  function lyricRoadTimingUnits() {
+    return lyricPaintTimelineSegments();
+  }
+
   function fillEstimatedWordTimes(wordSegments, lineStart, lineEnd) {
     for (let index = 0; index < wordSegments.length; index++) {
       const segment = wordSegments[index];
@@ -2207,7 +2227,7 @@
     if (state.lyricPhrasesCacheKey === cacheKey && state.lyricPhrasesCache) return state.lyricPhrasesCache;
 
     const groups = new Map();
-    lyricWordTimelineSegments().forEach((segment) => {
+    lyricPaintTimelineSegments().forEach((segment) => {
       if (!groups.has(segment.lineIndex)) groups.set(segment.lineIndex, []);
       groups.get(segment.lineIndex).push(segment);
     });
@@ -2252,10 +2272,10 @@
 
   function lyricAwareRoadTimeScale(ctx, width, songTime, notes) {
     const fallback = fixedRoadTimeScale(width, songTime, notes);
-    const words = lyricWordTimelineSegments();
-    if (!words.length) return fallback;
+    const timingUnits = lyricRoadTimingUnits();
+    if (!timingUnits.length) return fallback;
 
-    const intervals = lyricVisualIntervals(ctx, words, fallback.pixelsPerSecond);
+    const intervals = lyricVisualIntervals(ctx, timingUnits, fallback.pixelsPerSecond);
     if (!intervals.length) return fallback;
 
     const currentVisual = visualPositionAtTime(songTime, intervals, fallback.pixelsPerSecond);
@@ -2273,46 +2293,54 @@
     };
   }
 
-  function lyricVisualIntervals(ctx, words, pixelsPerSecond) {
-    const cacheKey = `${lyricContentCacheKey()}|${Math.round(pixelsPerSecond * 100)}`;
+  function lyricVisualIntervals(ctx, units, pixelsPerSecond) {
+    const firstUnit = units[0];
+    const lastUnit = units[units.length - 1];
+    const cacheKey = [
+      lyricContentCacheKey(),
+      units.length,
+      firstUnit?.unitType || "",
+      lastUnit?.unitType || "",
+      Math.round(pixelsPerSecond * 100),
+    ].join("|");
     if (state.lyricVisualCacheKey === cacheKey && state.lyricVisualIntervals) return state.lyricVisualIntervals;
-    const intervals = buildLyricVisualIntervals(ctx, words, pixelsPerSecond);
+    const intervals = buildLyricVisualIntervals(ctx, units, pixelsPerSecond);
     state.lyricVisualCacheKey = cacheKey;
     state.lyricVisualIntervals = intervals;
     return intervals;
   }
 
-  function buildLyricVisualIntervals(ctx, words, pixelsPerSecond) {
+  function buildLyricVisualIntervals(ctx, units, pixelsPerSecond) {
     const intervals = [];
     let cursor = 0;
     let previous = null;
     ctx.save();
     ctx.font = "900 23px sans-serif";
 
-    words.forEach((word) => {
-      const start = Number(word.start);
-      const end = Number(word.end);
+    units.forEach((unit) => {
+      const start = Number(unit.start);
+      const end = Number(unit.end);
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
 
       if (previous) {
         const gapSeconds = Math.max(0, start - previous.end);
         if (gapSeconds > 0.04) {
           cursor += clamp(gapSeconds * pixelsPerSecond * 0.46, 8, 92);
-          if (word.lineIndex !== previous.lineIndex) cursor += 18;
+          if (unit.lineIndex !== previous.lineIndex) cursor += 18;
         }
       }
 
-      const textWidth = ctx.measureText(word.text).width;
+      const textWidth = ctx.measureText(unit.text).width;
       const durationWidth = (end - start) * pixelsPerSecond * 0.92;
-      const minimumWidth = clamp(textWidth + 24, 44, 240);
+      const minimumWidth = clamp(textWidth + 20, 28, 240);
       const visualWidth = Math.max(durationWidth, minimumWidth);
       intervals.push({
-        ...word,
+        ...unit,
         visualStart: cursor,
         visualEnd: cursor + visualWidth,
       });
       cursor += visualWidth;
-      previous = word;
+      previous = unit;
     });
 
     ctx.restore();
@@ -2472,17 +2500,13 @@
       const isDone = songTime > phraseEnd;
       const fontSize = 23;
       ctx.font = `900 ${fontSize}px sans-serif`;
-      const layouts = phraseWordLayouts(ctx, phrase.words, fontSize);
-      const textWidth = layouts.totalWidth;
       const timeX1 = xForTime(phraseStart);
       const timeX2 = xForTime(phraseEnd);
-      const timeCenter = (timeX1 + timeX2) / 2;
       const timingWidth = Math.max(4, timeX2 - timeX1);
       const timingX = timeX1;
-      const textVisualWidth = Math.max(timingWidth, textWidth + 28);
-      const textVisualX = timeCenter - textVisualWidth / 2;
-      if (Math.max(timingX + timingWidth, textVisualX + textVisualWidth) < -120) return;
-      if (Math.min(timingX, textVisualX) > width + 120) return;
+      const layouts = timedPhraseWordLayouts(ctx, phrase.words, fontSize, xForTime);
+      if (Math.max(timingX + timingWidth, layouts.maxX) < -120) return;
+      if (Math.min(timingX, layouts.minX) > width + 120) return;
 
       const laneIndex = phraseLanes.get(phrase.lineIndex) ?? phrasePitchLane(phrase, contour, notes, pitchRange, laneCount);
       const y = textY + laneIndex * laneHeight;
@@ -2495,10 +2519,9 @@
       drawRoundRect(ctx, timingX, y - 17, timingWidth, 30, 8);
       ctx.fill();
 
-      const textX = textVisualX + (textVisualWidth - textWidth) / 2;
       layouts.items.forEach((layout) => {
         const word = layout.word;
-        const x = textX + layout.x;
+        const x = layout.x;
         const wordActive = songTime >= word.start && songTime < word.end;
         const wordDone = songTime >= word.end;
         ctx.globalAlpha = word.estimated ? 0.72 : 1;
@@ -2713,23 +2736,41 @@
     return { items, totalWidth };
   }
 
+  function timedPhraseWordLayouts(ctx, words, fontSize, xForTime) {
+    const items = [];
+    let minX = Infinity;
+    let maxX = -Infinity;
+    words.forEach((word) => {
+      const width = ctx.measureText(word.text).width;
+      const timedX = xForTime(Number(word.start));
+      const x = timedX + 4;
+      items.push({ word, x, width });
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x + width);
+    });
+    if (!items.length) {
+      return { items: [], minX: Infinity, maxX: -Infinity };
+    }
+    return { items, minX, maxX };
+  }
+
   function drawStageLyricRail(ctx, width, xForTime, songTime, railY, minTime, maxTime, hitX, contour = [], notes = []) {
     if (!state.lyrics.length) return;
 
     const phrases = visibleLyricPhrases(minTime, maxTime);
     const segments = visibleLyricSegments(minTime, maxTime);
     if (segments.length === 0 && phrases.length === 0) return;
-    const wordSegments = segments.filter((segment) => segment.unitType === "word");
-    const hasWordSegments = wordSegments.length > 0;
+    const timedSegments = segments.filter((segment) => segment.unitType !== "line");
+    const hasTimedSegments = timedSegments.length > 0;
     const fixedLyrics = Boolean(state.fixedLyricsEnabled);
 
     const railH = 10;
     const railTop = railY - 13;
-    const textY = railY + (hasWordSegments ? 24 : 20);
+    const textY = railY + (hasTimedSegments ? 24 : 20);
 
     ctx.save();
     ctx.fillStyle = "rgba(3, 6, 10, 0.46)";
-    drawRoundRect(ctx, 0, railTop - 16, width, fixedLyrics ? 44 : hasWordSegments ? 168 : 78, 0);
+    drawRoundRect(ctx, 0, railTop - 16, width, fixedLyrics ? 44 : hasTimedSegments ? 168 : 78, 0);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(246, 243, 234, 0.14)";
@@ -2763,12 +2804,12 @@
         ctx.fill();
       }
 
-      if (!hasWordSegments && !fixedLyrics) {
+      if (!hasTimedSegments && !fixedLyrics) {
         drawLyricSegmentText(ctx, segment, x1, x2, textY, songTime, hitX, width);
       }
     });
 
-    if (hasWordSegments && !fixedLyrics) {
+    if (hasTimedSegments && !fixedLyrics) {
       drawScrollingLyricPhrases(ctx, width, phrases, xForTime, songTime, textY + 8, contour, notes);
     }
 
@@ -2988,7 +3029,7 @@
       const isDone = songTime > end;
 
       if (previous && start - previous.end <= 1.35) {
-        ctx.strokeStyle = "rgba(246, 243, 234, 0.16)";
+        ctx.strokeStyle = "rgba(246, 243, 234, 0.055)";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(previous.x, previous.y);
@@ -3001,36 +3042,36 @@
       const innerTop = clampRoadY(yForMidi(midi + 0.5), layout);
       const innerBottom = clampRoadY(yForMidi(midi - 0.5), layout);
 
-      ctx.fillStyle = "rgba(237, 176, 73, 0.07)";
+      ctx.fillStyle = "rgba(237, 176, 73, 0.012)";
       drawRoundRect(ctx, x1, Math.min(outerTop, outerBottom), width, Math.max(6, Math.abs(outerBottom - outerTop)), 10);
       ctx.fill();
 
-      ctx.fillStyle = isCurrent ? "rgba(18, 199, 156, 0.24)" : "rgba(18, 199, 156, 0.12)";
+      ctx.fillStyle = isCurrent ? "rgba(18, 199, 156, 0.055)" : "rgba(18, 199, 156, 0.025)";
       drawRoundRect(ctx, x1, Math.min(innerTop, innerBottom), width, Math.max(4, Math.abs(innerBottom - innerTop)), 8);
       ctx.fill();
 
       ctx.fillStyle = isCurrent
-        ? "rgba(246, 243, 234, 0.94)"
+        ? "rgba(246, 243, 234, 0.34)"
         : isDone
-          ? "rgba(18, 199, 156, 0.36)"
-          : "rgba(155, 230, 214, 0.62)";
+          ? "rgba(18, 199, 156, 0.1)"
+          : "rgba(155, 230, 214, 0.16)";
       drawRoundRect(ctx, x1, blockY, width, blockHeight, Math.min(9, blockHeight / 2));
       ctx.fill();
 
-      ctx.strokeStyle = isCurrent ? "rgba(3, 6, 10, 0.84)" : "rgba(246, 243, 234, 0.18)";
+      ctx.strokeStyle = isCurrent ? "rgba(246, 243, 234, 0.2)" : "rgba(246, 243, 234, 0.055)";
       ctx.lineWidth = isCurrent ? 2 : 1;
       drawRoundRect(ctx, x1, blockY, width, blockHeight, Math.min(9, blockHeight / 2));
       ctx.stroke();
 
       if (isCurrent) {
         const doneWidth = Math.max(0, clamp(xForTime(songTime), x1, x2) - x1);
-        ctx.fillStyle = "rgba(18, 199, 156, 0.92)";
+        ctx.fillStyle = "rgba(18, 199, 156, 0.18)";
         drawRoundRect(ctx, x1, blockY, doneWidth, blockHeight, Math.min(9, blockHeight / 2));
         ctx.fill();
       }
 
       if (width > 54) {
-        ctx.fillStyle = isCurrent ? "rgba(3, 6, 10, 0.78)" : "rgba(3, 6, 10, 0.5)";
+        ctx.fillStyle = isCurrent ? "rgba(246, 243, 234, 0.42)" : "rgba(246, 243, 234, 0.16)";
         ctx.font = "800 12px sans-serif";
         ctx.fillText(noteName(midi), x1 + 8, blockY + blockHeight - 8);
       }
@@ -3059,26 +3100,30 @@
       const x2 = Math.min(layout.width + 48, xForTime(end));
       const width = Math.max(6, x2 - x1);
       const y = clampRoadY(yForMidi(midi), layout);
-      const height = clamp(layout.roadHeight * 0.028, 9, 16);
+      const height = clamp(layout.roadHeight * 0.038, 13, 22);
       const isCurrent = songTime >= start && songTime <= end;
       const isDone = songTime > end;
 
-      ctx.globalAlpha = isCurrent ? 1 : isDone ? 0.44 : 0.54 + confidence * 0.28;
+      ctx.globalAlpha = isCurrent ? 1 : isDone ? 0.62 : 0.78 + confidence * 0.18;
       ctx.fillStyle = isCurrent
-        ? "rgba(246, 243, 234, 0.96)"
+        ? "rgba(246, 243, 234, 0.98)"
         : isDone
-          ? "rgba(18, 199, 156, 0.56)"
-          : "rgba(155, 230, 214, 0.78)";
+          ? "rgba(18, 199, 156, 0.78)"
+          : "rgba(87, 230, 214, 0.96)";
       drawRoundRect(ctx, x1, y - height / 2, width, height, Math.min(7, height / 2));
       ctx.fill();
+
+      ctx.strokeStyle = "rgba(3, 6, 10, 0.74)";
+      ctx.lineWidth = 2;
+      drawRoundRect(ctx, x1, y - height / 2, width, height, Math.min(7, height / 2));
+      ctx.stroke();
 
       if (isCurrent) {
         ctx.globalAlpha = 1;
         ctx.strokeStyle = "rgba(18, 199, 156, 0.94)";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3;
         drawRoundRect(ctx, x1, y - height / 2, width, height, Math.min(7, height / 2));
         ctx.stroke();
-        ctx.lineWidth = 1;
       }
     });
 
@@ -3132,10 +3177,9 @@
 
   function trailColorForCents(absCents) {
     if (!Number.isFinite(absCents)) return "rgba(255, 216, 124, 0.9)";
-    if (absCents <= 40) return "rgba(18, 199, 156, 0.98)";
-    if (absCents <= 100) return "rgba(237, 176, 73, 0.98)";
-    if (absCents <= 200) return "rgba(244, 132, 76, 0.98)";
-    return "rgba(207, 77, 67, 0.98)";
+    if (absCents <= 45) return "rgba(18, 199, 156, 1)";
+    if (absCents <= 130) return "rgba(237, 176, 73, 1)";
+    return "rgba(207, 77, 67, 1)";
   }
 
   function drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour, songTime) {
@@ -3155,14 +3199,14 @@
     ctx.save();
     points.forEach((point) => {
       const age = Math.max(0, songTime - point.songTime);
-      const alpha = clamp(1 - age / Math.max(0.5, STAGE_ROAD_TRAIL_SECONDS), 0.14, 0.86);
-      const radius = clamp(7 - age * 1.4, 2.5, 7);
+      const alpha = clamp(1 - age / Math.max(0.5, STAGE_ROAD_TRAIL_SECONDS), 0.28, 1);
+      const radius = clamp(9 - age * 1.25, 3.25, 9);
       const x = xForTime(point.songTime);
       const y = clampRoadY(yForMidi(point.midi), layout);
       ctx.globalAlpha = alpha;
       ctx.fillStyle = trailColorForCents(point.cents);
-      ctx.strokeStyle = "rgba(3, 6, 10, 0.64)";
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(3, 6, 10, 0.82)";
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
@@ -3181,8 +3225,7 @@
     const songTime = Number.isFinite(songTimeOverride) ? songTimeOverride : songPlaybackTime(now);
     const notes = songGuideNotes();
     const contour = songGuideContour();
-    // Musical timing must stay linear: text width can affect readability, but not the clock.
-    const timeScale = fixedRoadTimeScale(width, songTime, notes);
+    const timeScale = lyricAwareRoadTimeScale(ctx, width, songTime, notes);
     const { hitX, minTime, maxTime, xForTime } = timeScale;
     const range = songRoadMidiRange(songTime, minTime, maxTime);
     const span = Math.max(1, range.maxMidi - range.minMidi);
@@ -3221,8 +3264,8 @@
     }
 
     const lyricSegments = visibleLyricSegments(minTime, maxTime);
-    const wordSegments = lyricSegments.filter((segment) => segment.unitType === "word");
-    drawLyricWordTimingBands(ctx, wordSegments, xForTime, layout, songTime);
+    const timedSegments = lyricSegments.filter((segment) => segment.unitType !== "line");
+    drawLyricWordTimingBands(ctx, timedSegments, xForTime, layout, songTime);
 
     for (let midi = Math.floor(range.minMidi); midi <= Math.ceil(range.maxMidi); midi++) {
       const y = yForMidi(midi);
@@ -3242,11 +3285,11 @@
 
     const visibleNotes = visibleRoadNotes(notes, minTime, maxTime);
     const visibleContour = visibleRoadContour(contour, minTime, maxTime);
-    drawLyricWordPitchBars(ctx, wordSegments, visibleContour, visibleNotes, xForTime, yForMidi, layout, songTime);
+    drawLyricWordPitchBars(ctx, timedSegments, visibleContour, visibleNotes, xForTime, yForMidi, layout, songTime);
+    drawPitchBandCorridors(ctx, visibleNotes, xForTime, yForMidi, layout);
+    drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime);
     if (visibleContour.length > 0) {
       drawTargetContourTiles(ctx, visibleContour, xForTime, yForMidi, layout, songTime);
-    } else {
-      drawTargetNoteBlocks(ctx, visibleNotes, xForTime, yForMidi, layout, songTime);
     }
 
     ctx.strokeStyle = "rgba(246, 243, 234, 0.84)";
@@ -3264,12 +3307,12 @@
       if (livePoint) {
         const y = clampRoadY(yForMidi(livePoint.midi), layout);
         const isHeld = Boolean(state.latestPitchHeld);
-        ctx.globalAlpha = isHeld ? 0.54 : 1;
+        ctx.globalAlpha = isHeld ? 0.72 : 1;
         ctx.fillStyle = trailColorForCents(livePoint.cents);
         ctx.strokeStyle = "rgba(246, 243, 234, 0.98)";
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(hitX, y, isHeld ? 6 : 8, 0, Math.PI * 2);
+        ctx.arc(hitX, y, isHeld ? 8 : 12, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
         ctx.globalAlpha = 1;

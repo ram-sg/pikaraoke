@@ -1,7 +1,13 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from biaoke.lib.coach_preparation import CoachPreparationManager
+import pytest
+
+from biaoke.lib.coach_preparation import (
+    CoachPreparationManager,
+    _review_coach_guide_with_ai,
+    _review_coach_guide_with_deepseek,
+)
 from biaoke.lib.events import EventSystem
 from biaoke.lib.karaoke_database import KaraokeDatabase
 
@@ -737,15 +743,36 @@ def test_review_track_with_ai_applies_revised_lyrics_and_marks_ready(tmp_path):
     )
 
     with patch(
-        "biaoke.lib.coach_preparation._review_coach_guide_with_deepseek",
+        "biaoke.lib.coach_preparation._review_coach_guide_with_ai",
         return_value={
             "_provider": "deepseek",
-            "_model": "deepseek-v4-flash",
+            "_model": "deepseek-v4-pro",
             "action": "apply",
             "confidence": 0.86,
             "summary": "Built line captions from transcript words.",
             "issues": ["needs_lyrics"],
             "lines": [{"start": 1.0, "end": 2.0, "text": "hello again"}],
+            "alignment": {
+                "granularity": "word",
+                "paint_units": [
+                    {
+                        "start": 1.0,
+                        "end": 1.4,
+                        "text": "hello",
+                        "line_index": 0,
+                        "unit_index": 0,
+                        "unit_type": "word",
+                    },
+                    {
+                        "start": 1.45,
+                        "end": 2.0,
+                        "text": "again",
+                        "line_index": 0,
+                        "unit_index": 1,
+                        "unit_type": "word",
+                    },
+                ],
+            },
         },
     ):
         result = manager.review_track_with_ai(track["id"])
@@ -761,11 +788,298 @@ def test_review_track_with_ai_applies_revised_lyrics_and_marks_ready(tmp_path):
     assert jobs[0]["status"] == "complete"
     assert revised["lyrics"]["status"] == "ready"
     assert revised["lyrics"]["lines"][0]["text"] == "hello again"
+    assert revised["lyrics"]["alignment"]["method"] == "deepseek_review_paint_units"
     assert revised["lyrics"]["alignment"]["granularity"] == "word"
+    assert revised["lyrics"]["alignment"]["paint_units"][1]["text"] == "again"
     assert revised["quality"]["status"] == "ready"
-    assert revised["quality"]["ai_review"]["model"] == "deepseek-v4-flash"
+    assert revised["quality"]["ai_review"]["model"] == "deepseek-v4-pro"
     assert revised["tasks"][0]["text"] == "hello again"
     assert guide_path.with_name(guide_path.name + ".before-ai-review").exists()
+    db.close()
+
+
+def test_deepseek_review_uses_pro_model_and_alignment_payload(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_THINKING", raising=False)
+    monkeypatch.delenv("DEEPSEEK_REASONING_EFFORT", raising=False)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "model": "deepseek-v4-pro",
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "action": "no_change",
+                                    "confidence": 0.8,
+                                    "summary": "No change.",
+                                    "issues": [],
+                                    "lines": [],
+                                }
+                            )
+                        }
+                    }
+                ],
+            }
+
+    guide = {
+        "lyrics": {
+            "status": "ready",
+            "lines": [{"start": 10.0, "end": 13.0, "text": "hello again"}],
+            "alignment": {
+                "status": "ready",
+                "granularity": "word",
+                "paint_units": [
+                    {"start": 10.0, "end": 10.5, "text": "hello", "line_index": 0, "unit_index": 0, "unit_type": "word"}
+                ],
+            },
+        },
+        "transcript": {
+            "status": "ready",
+            "words": [
+                {"word": "hello", "start": 10.05, "end": 10.5, "probability": 0.95},
+                {"word": "again", "start": 10.6, "end": 11.0, "probability": 0.94},
+            ],
+        },
+        "melody": {
+            "duration_seconds": 20,
+            "notes": [
+                {"start": 10.0, "end": 10.5, "midi": 60, "confidence": 0.9},
+                {"start": 10.6, "end": 11.0, "midi": 62, "confidence": 0.9},
+            ],
+        },
+        "quality": {"status": "needs_review", "messages": ["lyrics_duration_mismatch"]},
+    }
+
+    with patch("biaoke.lib.coach_preparation.requests.post", return_value=FakeResponse()) as post_mock:
+        review = _review_coach_guide_with_deepseek({"id": 7, "display_title": "Artist - Song"}, guide)
+
+    request_body = post_mock.call_args.kwargs["json"]
+    review_input = json.loads(request_body["messages"][1]["content"])
+    assert review["_model"] == "deepseek-v4-pro"
+    assert request_body["model"] == "deepseek-v4-pro"
+    assert request_body["thinking"] == {"type": "enabled"}
+    assert request_body["reasoning_effort"] == "high"
+    assert "alignment" in review_input["output_schema"]
+    assert review_input["lyrics"]["current_alignment"]["paint_units"][0]["text"] == "hello"
+    assert review_input["melody"]["vocal_activity_spans"][0]["start"] == 10.0
+
+
+def test_ai_review_auto_prefers_mimo_when_configured(monkeypatch):
+    monkeypatch.delenv("AI_REVIEW_PROVIDER", raising=False)
+    monkeypatch.setenv("MIMO_API_KEY", "test-mimo-key")
+    monkeypatch.delenv("MIMO_MODEL", raising=False)
+    monkeypatch.delenv("MIMO_BASE_URL", raising=False)
+    monkeypatch.delenv("MIMO_TIMEOUT", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "model": "mimo-v2.5-pro",
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "action": "apply",
+                                    "confidence": 0.82,
+                                    "summary": "Adjusted timing.",
+                                    "issues": [],
+                                    "lines": [{"start": 1.0, "end": 2.0, "text": "hello"}],
+                                }
+                            )
+                        }
+                    }
+                ],
+                "usage": {"total_tokens": 123},
+            }
+
+    guide = {
+        "lyrics": {"status": "ready", "lines": [{"start": 1.0, "end": 2.0, "text": "hello"}]},
+        "transcript": {"status": "ready", "words": [{"word": "hello", "start": 1.0, "end": 1.5}]},
+        "melody": {"duration_seconds": 5, "notes": [{"start": 1.0, "end": 1.5, "midi": 60}]},
+        "quality": {"status": "needs_review"},
+    }
+
+    with patch("biaoke.lib.coach_preparation.requests.post", return_value=FakeResponse()) as post_mock:
+        review = _review_coach_guide_with_ai({"id": 7, "display_title": "Artist - Song"}, guide)
+
+    request_body = post_mock.call_args.kwargs["json"]
+    headers = post_mock.call_args.kwargs["headers"]
+    assert post_mock.call_args.args[0] == "https://api.xiaomimimo.com/v1/chat/completions"
+    assert headers["api-key"] == "test-mimo-key"
+    assert request_body["model"] == "mimo-v2.5-pro"
+    assert request_body["temperature"] == 0.1
+    assert review["_provider"] == "mimo"
+    assert review["_model"] == "mimo-v2.5-pro"
+    assert review["_usage"]["total_tokens"] == 123
+
+
+def test_review_track_with_ai_rejects_rewritten_existing_lyrics(tmp_path):
+    media_path = tmp_path / "Artist - Canonical.mp4"
+    media_path.write_bytes(b"fake media")
+    guide_path = tmp_path / "Artist - Canonical.biaoke-coach.json"
+    original_guide = {
+        "schema": "biaoke.coach_guide",
+        "version": 1,
+        "stems": {
+            "status": "ready",
+            "vocals_path": str(tmp_path / "vocals.wav"),
+            "instrumental_path": str(tmp_path / "instrumental.wav"),
+        },
+        "transcript": {"status": "ready", "words": []},
+        "lyrics": {
+            "status": "ready",
+            "source": "lrclib",
+            "lines": [
+                {"start": 1, "end": 2, "text": "First real line"},
+                {"start": 2, "end": 3, "text": "Second real line"},
+                {"start": 3, "end": 4, "text": "Third real line"},
+                {"start": 4, "end": 5, "text": "Fourth real line"},
+            ],
+        },
+        "melody": {
+            "status": "ready",
+            "duration_seconds": 20,
+            "notes": [{"start": 1.0, "end": 2.0, "midi": 60, "confidence": 0.9}],
+        },
+        "quality": {
+            "status": "needs_review",
+            "messages": ["lyrics_duration_mismatch"],
+            "lyrics_ready": True,
+            "melody_ready": True,
+            "vocal_stem_ready": True,
+        },
+        "tasks": [],
+    }
+    guide_path.write_text(json.dumps(original_guide), encoding="utf-8")
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    track = db.upsert_coach_track(
+        source_type="local",
+        source_url=str(media_path),
+        source_id=str(media_path),
+        display_title="Artist - Canonical",
+        file_path=str(media_path),
+        status="needs_review",
+    )
+    db.set_coach_assets(track["id"], original_audio_path=str(media_path), guide_path=str(guide_path))
+
+    with (
+        patch(
+            "biaoke.lib.coach_preparation._review_coach_guide_with_ai",
+            return_value={
+                "_provider": "deepseek",
+                "_model": "deepseek-v4-flash",
+                "action": "apply",
+                "confidence": 0.9,
+                "summary": "Bad rewrite.",
+                "issues": [],
+                "lines": [
+                    {"start": 1, "end": 2, "text": "Completely different words"},
+                    {"start": 2, "end": 3, "text": "Invented transcript caption"},
+                    {"start": 3, "end": 4, "text": "Another wrong phrase"},
+                    {"start": 4, "end": 5, "text": "Not from source lyric"},
+                ],
+            },
+        ),
+        pytest.raises(ValueError, match="alterou texto demais"),
+    ):
+        manager.review_track_with_ai(track["id"])
+
+    unchanged = json.loads(guide_path.read_text(encoding="utf-8"))
+    job = db.list_coach_jobs(track["id"], limit=1)[0]
+
+    assert unchanged["lyrics"]["lines"][0]["text"] == "First real line"
+    assert job["stage"] == "ai_review"
+    assert job["status"] == "failed"
+    assert not guide_path.with_name(guide_path.name + ".before-ai-review").exists()
+    db.close()
+
+
+def test_revert_ai_review_restores_backup_and_updates_status(tmp_path):
+    media_path = tmp_path / "Artist - Song.mp4"
+    media_path.write_bytes(b"fake media")
+    guide_path = tmp_path / "Artist - Song.biaoke-coach.json"
+    backup_path = guide_path.with_name(guide_path.name + ".before-ai-review")
+    guide_path.write_text(
+        json.dumps(
+            {
+                "schema": "biaoke.coach_guide",
+                "lyrics": {
+                    "status": "ready",
+                    "source": "lrclib+deepseek_ai_review",
+                    "lines": [{"start": 1, "end": 2, "text": "AI line"}],
+                },
+                "melody": {"status": "ready", "notes": [{"start": 1, "end": 2, "midi": 60}]},
+                "quality": {"status": "ready", "messages": ["line_timing_only"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    backup_path.write_text(
+        json.dumps(
+            {
+                "schema": "biaoke.coach_guide",
+                "lyrics": {
+                    "status": "ready",
+                    "source": "lrclib",
+                    "lines": [{"start": 1, "end": 4, "text": "Original line"}],
+                },
+                "melody": {"status": "ready", "notes": [{"start": 1, "end": 2, "midi": 60}]},
+                "quality": {"status": "needs_review", "messages": ["lyrics_duration_mismatch"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    track = db.upsert_coach_track(
+        source_type="local",
+        source_url=str(media_path),
+        source_id=str(media_path),
+        display_title="Artist - Song",
+        file_path=str(media_path),
+        status="ready",
+    )
+    db.update_coach_track(track["id"], quality_status="ready")
+    db.set_coach_assets(track["id"], original_audio_path=str(media_path), guide_path=str(guide_path))
+
+    assert manager.get_track_with_assets(track["id"])["assets"]["has_ai_review_backup"] is True
+
+    result = manager.revert_ai_review(track["id"])
+    restored = json.loads(guide_path.read_text(encoding="utf-8"))
+    updated_track = db.get_coach_track(track["id"])
+    jobs = db.list_coach_jobs(track["id"], limit=1)
+
+    assert result is not None
+    assert restored["lyrics"]["lines"][0]["text"] == "Original line"
+    assert updated_track["status"] == "needs_review"
+    assert updated_track["quality_status"] == "needs_review"
+    assert jobs[0]["stage"] == "ai_revert"
+    assert jobs[0]["status"] == "complete"
+    assert not backup_path.exists()
+    assert guide_path.with_name(guide_path.name + ".after-ai-review").exists()
     db.close()
 
 

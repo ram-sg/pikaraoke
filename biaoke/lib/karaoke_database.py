@@ -503,6 +503,8 @@ class KaraokeDatabase:
             "extract_melody",
             "align_lyrics",
             "write_coach_guide",
+            "ai_review",
+            "ai_revert",
         )
         placeholders = ", ".join("?" for _ in analysis_stages)
         with self._lock, self._conn:

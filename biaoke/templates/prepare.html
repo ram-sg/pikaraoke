@@ -204,6 +204,36 @@
       });
     });
 
+    $(".revert-ai-coach-button").on("click", function () {
+      if (!window.confirm("Reverter para a versao anterior a revisao por IA?")) return;
+      var button = $(this);
+      var originalText = button.text();
+      button.addClass("is-loading").attr("disabled", true);
+      $.ajax({
+        url: "{{ url_for('prepare.revert_ai_prepared_track') }}",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+          track_id: Number(button.data("track-id")),
+        }),
+        success: function (data) {
+          button.removeClass("is-loading").addClass("is-success").text("Revertida");
+          showNotification(data.message || "Revisao por IA revertida", "is-success");
+          setTimeout(function () {
+            window.location.reload();
+          }, 700);
+        },
+        error: function (xhr) {
+          var data = xhr.responseJSON || {};
+          button.removeClass("is-loading").addClass("is-danger").text("Erro");
+          showNotification(data.message || "Nao foi possivel reverter a IA", "is-danger", 5000);
+          setTimeout(function () {
+            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
+          }, 2500);
+        },
+      });
+    });
+
     $(".delete-coach-button").on("click", function () {
       if (!window.confirm("Remover esta musica preparada e os arquivos gerados?")) return;
       var button = $(this);
@@ -328,6 +358,14 @@
           <button class="button is-small is-primary queue-coach-button" data-track-id="{{ track.id }}">
             Cantar no Coach
           </button>
+          <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
+            Corrigir com IA
+          </button>
+          {% if track.assets.has_ai_review_backup %}
+          <button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="{{ track.id }}">
+            Reverter IA
+          </button>
+          {% endif %}
           <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
             Reprocessar
           </button>
@@ -345,6 +383,11 @@
           <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
             Corrigir com IA
           </button>
+          {% if track.assets and track.assets.has_ai_review_backup %}
+          <button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="{{ track.id }}">
+            Reverter IA
+          </button>
+          {% endif %}
           <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
             Reprocessar
           </button>
