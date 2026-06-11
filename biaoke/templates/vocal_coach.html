@@ -20,19 +20,20 @@
   <div class="coach-backdrop"></div>
 
   <header class="coach-topbar">
-    <a class="coach-brand" href="/" aria-label="Biaoke home">
-      <span class="coach-brand-mark">B</span>
-      <span>
-        <strong>Biaoke</strong>
-        <small>Palco</small>
-      </span>
-    </a>
-
     <div class="coach-now-playing">
-      <div>
+      <div class="coach-song-card">
         <span>Tocando agora</span>
-        <strong id="coach-now-playing-song">--</strong>
+        <div class="coach-marquee">
+          <strong id="coach-now-playing-song" class="coach-marquee-text">--</strong>
+        </div>
         <small id="coach-now-playing-singer">--</small>
+      </div>
+      <div id="coach-up-next" class="coach-up-next coach-song-card">
+        <span>Próxima</span>
+        <div class="coach-marquee">
+          <strong id="coach-up-next-song" class="coach-marquee-text">--</strong>
+        </div>
+        <small id="coach-up-next-singer">--</small>
       </div>
       <div class="coach-clock">
         <span id="coach-current">00:00</span>
@@ -40,57 +41,84 @@
       </div>
     </div>
 
-    <div class="coach-controls" aria-label="Controles do palco">
-      <label>
-        <span>Modo</span>
-        <select id="coach-preset">
-          <option value="free">Livre</option>
+    <div class="coach-player-buttons" aria-label="Controles do player">
+      <button id="coach-player-back" type="button" title="Música anterior" aria-label="Música anterior">
+        <i class="icon icon-to-start" aria-hidden="true"></i>
+      </button>
+      <button id="coach-player-pause" type="button" title="Pausar ou retomar" aria-label="Pausar ou retomar">
+        <i id="coach-player-pause-icon" class="icon icon-pause" aria-hidden="true"></i>
+      </button>
+      <button id="coach-player-stop" type="button" title="Parar música" aria-label="Parar música">
+        <i class="icon icon-cancel-circled-outline" aria-hidden="true"></i>
+      </button>
+      <button id="coach-player-repeat" type="button" title="Repetir música" aria-label="Repetir música">
+        <i class="icon icon-exchange" aria-hidden="true"></i>
+      </button>
+      <button id="coach-player-forward" type="button" title="Próxima música" aria-label="Próxima música">
+        <i class="icon icon-to-end" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="coach-settings">
+      <button
+        id="coach-settings-toggle"
+        class="coach-settings-toggle"
+        type="button"
+        title="Configurações do Palco"
+        aria-controls="coach-settings-menu"
+        aria-expanded="false"
+      >
+        <i class="icon icon-cog" aria-hidden="true"></i>
+        <span>Configurações</span>
+      </button>
+
+      <div id="coach-settings-menu" class="coach-controls coach-settings-menu" aria-label="Configurações do palco" hidden>
+        <select id="coach-preset" hidden aria-hidden="true">
           <option value="song" selected>Música atual</option>
-          <option value="sustain">Notas longas</option>
-          <option value="scale">Escala</option>
-          <option value="intervals">Intervalos</option>
         </select>
-      </label>
 
-      <label>
-        <span>Região</span>
-        <select id="coach-range">
-          <option value="low">Grave</option>
-          <option value="mid" selected>Média</option>
-          <option value="high">Aguda</option>
-        </select>
-      </label>
+        <label>
+          <span>Região</span>
+          <select id="coach-range">
+            <option value="low">Grave</option>
+            <option value="mid" selected>Média</option>
+            <option value="high">Aguda</option>
+          </select>
+        </label>
 
-      <div class="coach-sync-controls" aria-label="Sincronismo da legenda">
-        <span>Legenda</span>
-        <button id="coach-lyrics-earlier" type="button" title="Adiantar legenda">−</button>
-        <strong id="coach-lyrics-offset">0.0s</strong>
-        <button id="coach-lyrics-later" type="button" title="Atrasar legenda">+</button>
-        <button id="coach-lyrics-reset-sync" type="button" title="Zerar sincronismo">0</button>
+        <div class="coach-sync-controls" aria-label="Sincronismo da legenda">
+          <span>Legenda</span>
+          <button id="coach-lyrics-earlier" type="button" title="Adiantar legenda">−</button>
+          <strong id="coach-lyrics-offset">0.0s</strong>
+          <button id="coach-lyrics-later" type="button" title="Atrasar legenda">+</button>
+          <button id="coach-lyrics-reset-sync" type="button" title="Zerar sincronismo">0</button>
+        </div>
+
+        <label class="coach-toggle-control" title="Tocar a faixa original cantada junto com o instrumental">
+          <input id="coach-reference-toggle" type="checkbox" />
+          <span>Voz original</span>
+        </label>
+
+        <label class="coach-toggle-control" title="Fixar a letra como karaoke tradicional">
+          <input id="coach-fixed-lyrics-toggle" type="checkbox" />
+          <span>Letra fixa</span>
+        </label>
+
+        <label title="Dificuldade do score vocal">
+          <span>Dificuldade</span>
+          <select id="coach-difficulty">
+            <option value="festa">Festa</option>
+            <option value="treino" selected>Treino</option>
+            <option value="pro">Pro</option>
+          </select>
+        </label>
+
+        <div class="coach-settings-actions">
+          <button id="coach-reset" type="button" title="Reiniciar sessão">Reiniciar</button>
+          <button id="coach-fullscreen" type="button" title="Tela cheia">Tela cheia</button>
+          <button id="coach-start" class="is-primary" type="button">Iniciar</button>
+        </div>
       </div>
-
-      <label class="coach-toggle-control" title="Tocar a faixa original cantada junto com o instrumental">
-        <input id="coach-reference-toggle" type="checkbox" />
-        <span>Voz original</span>
-      </label>
-
-      <label class="coach-toggle-control" title="Fixar a letra como karaoke tradicional">
-        <input id="coach-fixed-lyrics-toggle" type="checkbox" />
-        <span>Letra fixa</span>
-      </label>
-
-      <label title="Dificuldade do score vocal">
-        <span>Dificuldade</span>
-        <select id="coach-difficulty">
-          <option value="festa">Festa</option>
-          <option value="treino" selected>Treino</option>
-          <option value="pro">Pro</option>
-        </select>
-      </label>
-
-      <button id="coach-reset" type="button" title="Reiniciar sessão">Reiniciar</button>
-      <button id="coach-fullscreen" type="button" title="Tela cheia">Tela cheia</button>
-      <button id="coach-start" class="is-primary" type="button">Iniciar</button>
     </div>
   </header>
 
@@ -175,12 +203,6 @@
             </div>
           </div>
         </div>
-      </div>
-
-      <div id="coach-up-next" class="coach-up-next">
-        <span>Próxima</span>
-        <strong id="coach-up-next-song">--</strong>
-        <small id="coach-up-next-singer">--</small>
       </div>
     </section>
 

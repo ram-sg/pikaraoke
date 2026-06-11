@@ -8,11 +8,14 @@ from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
 from biaoke.lib.current_app import get_karaoke_instance, get_site_name
+from biaoke.lib.metadata_parser import remove_accents
 from biaoke.lib.youtube_dl import get_search_results
 
 _ = flask_babel.gettext
 
 prepare_bp = Blueprint("prepare", __name__)
+DEFAULT_SEARCH_COUNT = 10
+MAX_SEARCH_COUNT = 50
 
 
 class PrepareYoutubeBody(Schema):
@@ -40,23 +43,37 @@ def prepare():
     """Stage preparation page."""
     k = get_karaoke_instance()
     search_string = request.args.get("search_string")
+    search_count = _bounded_int_arg("search_count", DEFAULT_SEARCH_COUNT, DEFAULT_SEARCH_COUNT, MAX_SEARCH_COUNT)
+    local_track_results = []
+    local_file_results = []
     if search_string:
-        search_results = get_search_results(search_string, k.additional_ytdl_args)
+        local_track_results = _search_prepared_tracks(k, search_string, limit=12)
+        local_file_results = _search_local_song_files(k, search_string, local_track_results, limit=8)
+        search_results = get_search_results(
+            search_string,
+            k.additional_ytdl_args,
+            limit=search_count,
+        )
     else:
         search_string = None
         search_results = None
-    tracks = k.coach_preparation.list_tracks(limit=50)
+    tracks = _list_prepared_tracks(k, limit=50)
+    processing_queue = _get_processing_queue(k, limit=100)
 
     return render_template(
         "prepare.html",
         site_title=get_site_name(),
         title="Musicas",
         search_results=search_results,
+        local_track_results=local_track_results,
+        local_file_results=local_file_results,
         search_string=search_string,
+        search_count=search_count,
+        next_search_count=min(search_count + DEFAULT_SEARCH_COUNT, MAX_SEARCH_COUNT),
+        max_search_count=MAX_SEARCH_COUNT,
         tracks=tracks,
-        has_active_preparation=any(
-            track.get("status") in {"queued", "processing"} for track in tracks
-        ),
+        processing_queue=processing_queue,
+        has_active_preparation=_has_active_preparation(tracks, processing_queue),
     )
 
 
@@ -166,4 +183,126 @@ def delete_prepared_track(form):
 def prepare_status():
     """Return current stage preparation catalog status."""
     k = get_karaoke_instance()
-    return jsonify({"tracks": k.coach_preparation.list_tracks(limit=100)})
+    tracks = _list_prepared_tracks(k, limit=100)
+    processing_queue = _get_processing_queue(k, limit=100)
+    downloads = _get_downloads_status(k)
+    return jsonify(
+        {
+            "tracks": tracks,
+            "processing_queue": processing_queue,
+            "downloads": downloads,
+            "has_active_preparation": _has_active_preparation(tracks, processing_queue, downloads),
+        }
+    )
+
+
+def _bounded_int_arg(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(value, maximum))
+
+
+def _has_active_preparation(
+    tracks: list[dict],
+    processing_queue: list[dict],
+    downloads: dict | None = None,
+) -> bool:
+    if processing_queue:
+        return True
+    if any(track.get("status") in {"queued", "processing"} for track in tracks):
+        return True
+    downloads = downloads or {}
+    return bool(downloads.get("active") or downloads.get("pending"))
+
+
+def _list_prepared_tracks(k, *, limit: int) -> list[dict]:
+    tracks = k.coach_preparation.list_tracks(limit=limit)
+    return tracks if isinstance(tracks, list) else []
+
+
+def _search_prepared_tracks(k, query: str, *, limit: int) -> list[dict]:
+    search = getattr(k.coach_preparation, "search_tracks", None)
+    if not callable(search):
+        return []
+    tracks = search(query, limit=limit)
+    return tracks if isinstance(tracks, list) else []
+
+
+def _get_processing_queue(k, *, limit: int) -> list[dict]:
+    get_queue = getattr(k.coach_preparation, "get_processing_queue", None)
+    if not callable(get_queue):
+        return []
+    queue = get_queue(limit=limit)
+    return queue if isinstance(queue, list) else []
+
+
+def _get_downloads_status(k) -> dict:
+    download_manager = getattr(k, "download_manager", None)
+    get_status = getattr(download_manager, "get_downloads_status", None)
+    if not callable(get_status):
+        return {}
+    downloads = get_status()
+    return downloads if isinstance(downloads, dict) else {}
+
+
+def _search_local_song_files(
+    k,
+    query: str,
+    prepared_tracks: list[dict],
+    *,
+    limit: int = 8,
+) -> list[dict]:
+    """Find matching local library files that do not already have a Palco track."""
+    terms = _prepare_search_terms(query)
+    if not terms:
+        return []
+
+    prepared_paths = _prepared_track_paths(prepared_tracks)
+    matches = []
+    for song_path in k.song_manager.songs:
+        if song_path in prepared_paths:
+            continue
+        display_title = k.song_manager.display_name_from_path(song_path)
+        haystack = _normalize_prepare_search(f"{display_title} {song_path}")
+        if not all(term in haystack for term in terms):
+            continue
+        matches.append(
+            {
+                "display_title": display_title,
+                "file_path": song_path,
+                "source_type": "local",
+                "status": "not_prepared",
+            }
+        )
+        if len(matches) >= limit:
+            break
+    return matches
+
+
+def _prepared_track_paths(tracks: list[dict]) -> set[str]:
+    paths = set()
+    for track in tracks:
+        assets = track.get("assets") or {}
+        for raw_path in (
+            track.get("file_path"),
+            assets.get("original_audio_path"),
+            assets.get("instrumental_audio_path"),
+            assets.get("vocal_reference_path"),
+        ):
+            if raw_path:
+                paths.add(str(raw_path))
+    return paths
+
+
+def _prepare_search_terms(query: str) -> list[str]:
+    return [term for term in _normalize_prepare_search(query).split() if term]
+
+
+def _normalize_prepare_search(text: str | None) -> str:
+    import re
+
+    normalized = remove_accents(str(text or "")).casefold()
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()

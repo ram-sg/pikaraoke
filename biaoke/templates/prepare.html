@@ -12,6 +12,14 @@
     padding: 1rem;
   }
 
+  .prepare-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
   .prepare-result {
     display: grid;
     grid-template-columns: 120px 1fr auto;
@@ -21,7 +29,9 @@
     border-bottom: 1px solid #2c3338;
   }
 
-  .prepare-result:last-child {
+  .prepare-result:last-child,
+  .prepare-track:last-child,
+  .prepare-queue-item:last-child {
     border-bottom: 0;
   }
 
@@ -39,18 +49,20 @@
     display: block;
   }
 
-  .prepare-track {
+  .prepare-local-result {
+    grid-template-columns: 1fr auto;
+  }
+
+  .prepare-track,
+  .prepare-queue-item {
     display: grid;
     gap: 0.35rem;
     padding: 0.75rem 0;
     border-bottom: 1px solid #2c3338;
   }
 
-  .prepare-track:last-child {
-    border-bottom: 0;
-  }
-
-  .prepare-track-header {
+  .prepare-track-header,
+  .prepare-queue-header {
     display: flex;
     justify-content: space-between;
     gap: 0.75rem;
@@ -68,210 +80,407 @@
     align-items: center;
   }
 
+  .prepare-results-group {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .prepare-results-title {
+    color: #dce3e8;
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin: 0.35rem 0 0;
+  }
+
+  .prepare-progress {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #273038;
+  }
+
+  .prepare-progress > span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: #f2b705;
+    transition: width 0.2s ease;
+  }
+
+  .prepare-search-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: space-between;
+  }
+
   @media screen and (max-width: 680px) {
-    .prepare-result {
+    .prepare-result,
+    .prepare-local-result {
       grid-template-columns: 1fr;
     }
 
-    .prepare-track-header {
+    .prepare-track-header,
+    .prepare-queue-header,
+    .prepare-panel-header,
+    .prepare-search-meta {
       align-items: flex-start;
       flex-direction: column;
     }
   }
 </style>
 <script>
-  $(function () {
-    $("#prepare-search-button").on("click", function (event) {
-      event.preventDefault();
-      var query = ($("#prepare-search-input").val() || "").trim();
-      if (!query) return;
-      $("#prepare-search-hidden").val(query);
-      $("#prepare-search-form").submit();
-    });
+  (function () {
+    const statusUrl = "{{ url_for('prepare.prepare_status') }}";
+    const prepareYoutubeUrl = "{{ url_for('prepare.prepare_youtube') }}";
+    const prepareLocalUrl = "{{ url_for('prepare.prepare_local') }}";
+    const enqueueUrl = "{{ url_for('prepare.enqueue_prepared_track') }}";
+    const reanalyzeUrl = "{{ url_for('prepare.reanalyze_prepared_track') }}";
+    const reviewAiUrl = "{{ url_for('prepare.review_ai_prepared_track') }}";
+    const revertAiUrl = "{{ url_for('prepare.revert_ai_prepared_track') }}";
+    const deleteUrl = "{{ url_for('prepare.delete_prepared_track') }}";
+    const initialHasActivePreparation = {{ 'true' if has_active_preparation else 'false' }};
 
-    $(".prepare-youtube-button").on("click", function () {
-      var button = $(this);
-      var originalText = button.text();
-      button.addClass("is-loading").attr("disabled", true);
-      $.ajax({
-        url: "{{ url_for('prepare.prepare_youtube') }}",
-        type: "POST",
-        contentType: "application/json",
-        data: JSON.stringify({
-          song_url: button.data("url"),
-          song_title: button.data("title") || "",
-          song_added_by: getUserCookie() || "",
-        }),
-        success: function () {
-          button.removeClass("is-loading").addClass("is-success").text("Preparando");
-          setTimeout(function () {
-            window.location.href = "{{ url_for('prepare.prepare') }}";
-          }, 700);
-        },
-        error: function () {
-          button.removeClass("is-loading").addClass("is-danger").text("Erro");
-          setTimeout(function () {
-            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
-          }, 2000);
-        },
+    function escapeHtml(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function percent(value) {
+      const number = Number(value || 0);
+      return Math.max(0, Math.min(100, number));
+    }
+
+    function statusTagClass(status) {
+      if (status === "ready") return "is-success";
+      if (status === "failed") return "is-danger";
+      if (status === "processing" || status === "running") return "is-warning";
+      if (status === "needs_review") return "is-warning";
+      return "is-info";
+    }
+
+    function stageLabel(stage) {
+      const labels = {
+        acquire: "baixando",
+        analyze_pending: "na fila",
+        build_guide: "gerando guia",
+        separate_stems: "separando voz",
+        extract_melody: "extraindo notas",
+        align_lyrics: "sincronizando letra",
+        write_coach_guide: "salvando pacote",
+        ai_review: "corrigindo com IA",
+        ai_revert: "revertendo IA",
+      };
+      return labels[stage] || stage || "--";
+    }
+
+    function latestJobLine(track) {
+      const latest = track.latest_job || {};
+      if (!latest.id) return "";
+      const progress = percent(latest.progress);
+      const error = latest.error ? ` · ${escapeHtml(latest.error)}` : "";
+      return `
+        <div class="is-size-7 has-text-grey-light">
+          Etapa: ${escapeHtml(stageLabel(latest.stage))} · ${escapeHtml(latest.status || "--")} · ${progress.toFixed(0)}%${error}
+        </div>
+        ${(latest.status === "running" || track.status === "processing") ? `
+          <div class="prepare-progress" aria-hidden="true"><span style="width: ${progress}%"></span></div>
+        ` : ""}
+      `;
+    }
+
+    function trackActions(track) {
+      const assets = track.assets || {};
+      const id = Number(track.id);
+      const readyPlayable = track.status === "ready"
+        && assets.guide_path
+        && (assets.instrumental_audio_path || assets.original_audio_path);
+      const parts = [];
+
+      if (readyPlayable) {
+        parts.push(`<button class="button is-small is-primary queue-coach-button" data-track-id="${id}">Cantar no Palco</button>`);
+        parts.push(`<button class="button is-small is-warning review-ai-coach-button" data-track-id="${id}">Corrigir com IA</button>`);
+        if (assets.has_ai_review_backup) {
+          parts.push(`<button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="${id}">Reverter IA</button>`);
+        }
+        parts.push(`<button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="${id}">Reprocessar</button>`);
+        parts.push(`<button class="button is-small is-danger is-light delete-coach-button" data-track-id="${id}">Excluir</button>`);
+        parts.push(assets.instrumental_audio_path
+          ? `<span class="tag is-success is-light">instrumental pronto</span>`
+          : `<span class="tag is-warning is-light">sem instrumental</span>`);
+      } else if (track.status === "needs_review") {
+        parts.push(`<button class="button is-small is-warning review-ai-coach-button" data-track-id="${id}">Corrigir com IA</button>`);
+        if (assets.has_ai_review_backup) {
+          parts.push(`<button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="${id}">Reverter IA</button>`);
+        }
+        parts.push(`<button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="${id}">Reprocessar</button>`);
+        parts.push(`<button class="button is-small is-danger is-light delete-coach-button" data-track-id="${id}">Excluir</button>`);
+        parts.push(`<span class="tag is-warning is-light">precisa revisao</span>`);
+      } else if (track.status === "failed") {
+        parts.push(`<button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="${id}">Reprocessar</button>`);
+        parts.push(`<button class="button is-small is-danger is-light delete-coach-button" data-track-id="${id}">Excluir</button>`);
+      } else if (track.status !== "queued" && track.status !== "processing") {
+        parts.push(`<button class="button is-small is-danger is-light delete-coach-button" data-track-id="${id}">Excluir</button>`);
+      }
+
+      return parts.length ? `<div class="prepare-actions">${parts.join("")}</div>` : "";
+    }
+
+    function renderTrack(track) {
+      const title = track.display_title || track.title || "Musica";
+      const source = track.source_type || "local";
+      const path = track.file_path ? ` · ${track.file_path}` : "";
+      return `
+        <div class="prepare-track" data-track-id="${Number(track.id || 0)}">
+          <div class="prepare-track-header">
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              <div class="is-size-7 has-text-grey">${escapeHtml(source)}${escapeHtml(path)}</div>
+            </div>
+            <span class="tag prepare-status ${statusTagClass(track.status)}">${escapeHtml(track.status || "--")}</span>
+          </div>
+          ${latestJobLine(track)}
+          ${trackActions(track)}
+        </div>
+      `;
+    }
+
+    function renderTracks(tracks) {
+      const container = $("#prepare-track-list");
+      if (!container.length) return;
+      if (!Array.isArray(tracks) || !tracks.length) {
+        container.html('<p class="has-text-grey-light">Nenhuma musica preparada ainda.</p>');
+        return;
+      }
+      container.html(tracks.map(renderTrack).join(""));
+    }
+
+    function renderProcessingQueue(queue, downloads) {
+      const container = $("#prepare-processing-list");
+      if (!container.length) return;
+      const items = [];
+      const active = downloads && downloads.active;
+      const pending = downloads && Array.isArray(downloads.pending) ? downloads.pending : [];
+
+      if (active) {
+        const progress = percent(active.progress);
+        items.push(`
+          <div class="prepare-queue-item">
+            <div class="prepare-queue-header">
+              <strong>${escapeHtml(active.title || active.url || "Download")}</strong>
+              <span class="tag is-warning">download</span>
+            </div>
+            <div class="is-size-7 has-text-grey-light">
+              ${escapeHtml(active.status || "baixando")} · ${progress.toFixed(0)}% · ${escapeHtml(active.speed || "---")} · ETA ${escapeHtml(active.eta || "--:--")}
+            </div>
+            <div class="prepare-progress" aria-hidden="true"><span style="width: ${progress}%"></span></div>
+          </div>
+        `);
+      }
+
+      pending.forEach(function (item, index) {
+        items.push(`
+          <div class="prepare-queue-item">
+            <div class="prepare-queue-header">
+              <strong>${escapeHtml(item.display_title || item.title || item.video_url || "Download")}</strong>
+              <span class="tag is-info">download #${index + 2}</span>
+            </div>
+            <div class="is-size-7 has-text-grey-light">Aguardando download</div>
+          </div>
+        `);
       });
-    });
 
-    $(".queue-coach-button").on("click", function () {
-      var button = $(this);
-      var originalText = button.text();
+      (Array.isArray(queue) ? queue : []).forEach(function (item) {
+        const progress = percent(item.progress);
+        items.push(`
+          <div class="prepare-queue-item">
+            <div class="prepare-queue-header">
+              <strong>${escapeHtml(item.display_title || "Musica")}</strong>
+              <span class="tag ${statusTagClass(item.job_status || item.track_status)}">${escapeHtml(item.job_status || item.track_status || "--")}</span>
+            </div>
+            <div class="is-size-7 has-text-grey-light">
+              Etapa: ${escapeHtml(stageLabel(item.stage))} · ${progress.toFixed(0)}%
+              ${item.error ? ` · ${escapeHtml(item.error)}` : ""}
+            </div>
+            ${(item.job_status === "running" || item.track_status === "processing") ? `
+              <div class="prepare-progress" aria-hidden="true"><span style="width: ${progress}%"></span></div>
+            ` : ""}
+          </div>
+        `);
+      });
+
+      container.html(items.length ? items.join("") : '<p class="has-text-grey-light">Nenhum processamento em andamento.</p>');
+    }
+
+    function refreshPrepareStatus(options) {
+      const settings = options || {};
+      if (!$("#prepare-track-list").length) return;
+      clearTimeout(window.prepareStatusTimer);
+      $.getJSON(statusUrl)
+        .done(function (data) {
+          renderTracks(data.tracks || []);
+          renderProcessingQueue(data.processing_queue || [], data.downloads || {});
+          if (data.has_active_preparation || settings.keepPolling) {
+            window.prepareStatusTimer = setTimeout(refreshPrepareStatus, 5000);
+          }
+        })
+        .fail(function () {
+          window.prepareStatusTimer = setTimeout(refreshPrepareStatus, 8000);
+        });
+    }
+
+    function postJson(button, url, payload, successText, errorText, done) {
+      const originalText = button.text();
       button.addClass("is-loading").attr("disabled", true);
       $.ajax({
-        url: "{{ url_for('prepare.enqueue_prepared_track') }}",
+        url: url,
         type: "POST",
         contentType: "application/json",
-        data: JSON.stringify({
-          track_id: Number(button.data("track-id")),
-          song_added_by: getUserCookie() || "",
-        }),
+        data: JSON.stringify(payload),
         success: function (data) {
-          button.removeClass("is-loading").addClass("is-success").text("Na fila");
-          showNotification(data.message || "Musica adicionada a fila", "is-success");
+          button.removeClass("is-loading").addClass("is-success").text(successText);
+          showNotification(data.message || successText, "is-success");
+          refreshPrepareStatus({ keepPolling: true });
+          if (typeof done === "function") done(data);
           setTimeout(function () {
             button.removeClass("is-success").removeAttr("disabled").text(originalText);
-          }, 2500);
+          }, 1800);
         },
         error: function (xhr) {
-          var data = xhr.responseJSON || {};
+          const data = xhr.responseJSON || {};
           button.removeClass("is-loading").addClass("is-danger").text("Erro");
-          showNotification(data.message || "Nao foi possivel adicionar", "is-danger");
+          showNotification(data.message || errorText || "Operacao falhou", "is-danger", 5000);
           setTimeout(function () {
             button.removeClass("is-danger").removeAttr("disabled").text(originalText);
           }, 2500);
         },
       });
-    });
-
-    $(".reanalyze-coach-button").on("click", function () {
-      var button = $(this);
-      var originalText = button.text();
-      button.addClass("is-loading").attr("disabled", true);
-      $.ajax({
-        url: "{{ url_for('prepare.reanalyze_prepared_track') }}",
-        type: "POST",
-        contentType: "application/json",
-        data: JSON.stringify({
-          track_id: Number(button.data("track-id")),
-        }),
-        success: function () {
-          button.removeClass("is-loading").addClass("is-success").text("Reprocessando");
-          setTimeout(function () {
-            window.location.reload();
-          }, 700);
-        },
-        error: function (xhr) {
-          var data = xhr.responseJSON || {};
-          button.removeClass("is-loading").addClass("is-danger").text("Erro");
-          showNotification(data.message || "Nao foi possivel reprocessar", "is-danger");
-          setTimeout(function () {
-            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
-          }, 2500);
-        },
-      });
-    });
-
-    $(".review-ai-coach-button").on("click", function () {
-      var button = $(this);
-      var originalText = button.text();
-      button.addClass("is-loading").attr("disabled", true);
-      $.ajax({
-        url: "{{ url_for('prepare.review_ai_prepared_track') }}",
-        type: "POST",
-        contentType: "application/json",
-        data: JSON.stringify({
-          track_id: Number(button.data("track-id")),
-        }),
-        success: function (data) {
-          button.removeClass("is-loading").addClass("is-success").text("Revisada");
-          showNotification(data.message || "Revisao por IA concluida", "is-success");
-          setTimeout(function () {
-            window.location.reload();
-          }, 900);
-        },
-        error: function (xhr) {
-          var data = xhr.responseJSON || {};
-          button.removeClass("is-loading").addClass("is-danger").text("Erro");
-          showNotification(data.message || "Nao foi possivel revisar com IA", "is-danger", 5000);
-          setTimeout(function () {
-            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
-          }, 2500);
-        },
-      });
-    });
-
-    $(".revert-ai-coach-button").on("click", function () {
-      if (!window.confirm("Reverter para a versao anterior a revisao por IA?")) return;
-      var button = $(this);
-      var originalText = button.text();
-      button.addClass("is-loading").attr("disabled", true);
-      $.ajax({
-        url: "{{ url_for('prepare.revert_ai_prepared_track') }}",
-        type: "POST",
-        contentType: "application/json",
-        data: JSON.stringify({
-          track_id: Number(button.data("track-id")),
-        }),
-        success: function (data) {
-          button.removeClass("is-loading").addClass("is-success").text("Revertida");
-          showNotification(data.message || "Revisao por IA revertida", "is-success");
-          setTimeout(function () {
-            window.location.reload();
-          }, 700);
-        },
-        error: function (xhr) {
-          var data = xhr.responseJSON || {};
-          button.removeClass("is-loading").addClass("is-danger").text("Erro");
-          showNotification(data.message || "Nao foi possivel reverter a IA", "is-danger", 5000);
-          setTimeout(function () {
-            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
-          }, 2500);
-        },
-      });
-    });
-
-    $(".delete-coach-button").on("click", function () {
-      if (!window.confirm("Remover esta musica preparada e os arquivos gerados?")) return;
-      var button = $(this);
-      var originalText = button.text();
-      button.addClass("is-loading").attr("disabled", true);
-      $.ajax({
-        url: "{{ url_for('prepare.delete_prepared_track') }}",
-        type: "POST",
-        contentType: "application/json",
-        data: JSON.stringify({
-          track_id: Number(button.data("track-id")),
-          delete_files: true,
-        }),
-        success: function (data) {
-          button.removeClass("is-loading").addClass("is-success").text("Removida");
-          showNotification(data.message || "Musica removida", "is-success");
-          setTimeout(function () {
-            window.location.reload();
-          }, 700);
-        },
-        error: function (xhr) {
-          var data = xhr.responseJSON || {};
-          button.removeClass("is-loading").addClass("is-danger").text("Erro");
-          showNotification(data.message || "Nao foi possivel remover", "is-danger");
-          setTimeout(function () {
-            button.removeClass("is-danger").removeAttr("disabled").text(originalText);
-          }, 2500);
-        },
-      });
-    });
-
-    var hasActivePreparation = {{ 'true' if has_active_preparation else 'false' }};
-    if (hasActivePreparation) {
-      setTimeout(function () {
-        window.location.reload();
-      }, 5000);
     }
-  });
+
+    function initPreparePage() {
+      clearTimeout(window.prepareStatusTimer);
+
+      $("#prepare-search-form").off("submit.prepare").on("submit.prepare", function (event) {
+        const query = ($("#prepare-search-input").val() || "").trim();
+        if (!query) {
+          event.preventDefault();
+          return;
+        }
+        $("#prepare-search-input").val(query);
+      });
+
+      $(document).off("click.prepare", ".prepare-youtube-button");
+      $(document).on("click.prepare", ".prepare-youtube-button", function () {
+        setUserCookie();
+        const button = $(this);
+        postJson(
+          button,
+          prepareYoutubeUrl,
+          {
+            song_url: button.data("url"),
+            song_title: button.data("title") || "",
+            song_added_by: getUserCookie() || "",
+          },
+          "Na fila",
+          "Nao foi possivel preparar"
+        );
+      });
+
+      $(document).off("click.prepare", ".prepare-local-button");
+      $(document).on("click.prepare", ".prepare-local-button", function () {
+        const button = $(this);
+        postJson(
+          button,
+          prepareLocalUrl,
+          { file_path: button.attr("data-file-path") || "" },
+          "Na fila",
+          "Nao foi possivel preparar arquivo local"
+        );
+      });
+
+      $(document).off("click.prepare", ".queue-coach-button");
+      $(document).on("click.prepare", ".queue-coach-button", function () {
+        setUserCookie();
+        const button = $(this);
+        postJson(
+          button,
+          enqueueUrl,
+          {
+            track_id: Number(button.data("track-id")),
+            song_added_by: getUserCookie() || "",
+          },
+          "Na fila",
+          "Nao foi possivel adicionar"
+        );
+      });
+
+      $(document).off("click.prepare", ".reanalyze-coach-button");
+      $(document).on("click.prepare", ".reanalyze-coach-button", function () {
+        const button = $(this);
+        postJson(
+          button,
+          reanalyzeUrl,
+          { track_id: Number(button.data("track-id")) },
+          "Reprocessando",
+          "Nao foi possivel reprocessar"
+        );
+      });
+
+      $(document).off("click.prepare", ".review-ai-coach-button");
+      $(document).on("click.prepare", ".review-ai-coach-button", function () {
+        const button = $(this);
+        postJson(
+          button,
+          reviewAiUrl,
+          { track_id: Number(button.data("track-id")) },
+          "Revisada",
+          "Nao foi possivel revisar com IA"
+        );
+      });
+
+      $(document).off("click.prepare", ".revert-ai-coach-button");
+      $(document).on("click.prepare", ".revert-ai-coach-button", function () {
+        if (!window.confirm("Reverter para a versao anterior a revisao por IA?")) return;
+        const button = $(this);
+        postJson(
+          button,
+          revertAiUrl,
+          { track_id: Number(button.data("track-id")) },
+          "Revertida",
+          "Nao foi possivel reverter a IA"
+        );
+      });
+
+      $(document).off("click.prepare", ".delete-coach-button");
+      $(document).on("click.prepare", ".delete-coach-button", function () {
+        if (!window.confirm("Remover esta musica preparada e os arquivos gerados?")) return;
+        const button = $(this);
+        postJson(
+          button,
+          deleteUrl,
+          {
+            track_id: Number(button.data("track-id")),
+            delete_files: true,
+          },
+          "Removida",
+          "Nao foi possivel remover"
+        );
+      });
+
+      renderProcessingQueue({{ processing_queue|tojson }}, {});
+      if (initialHasActivePreparation) {
+        window.prepareStatusTimer = setTimeout(refreshPrepareStatus, 2500);
+      }
+    }
+
+    $(initPreparePage);
+  })();
 </script>
 {% endblock %} {% block header %}
 <h1>{% block title %}Musicas{% endblock %}</h1>
@@ -280,142 +489,247 @@
   <section class="prepare-panel">
     <h2 class="title is-5">Buscar musica original</h2>
     <p class="has-text-grey-light mb-3">
-      Busque, baixe e prepare a musica para o Palco. Ela so entra na fila quando o pacote estiver pronto.
+      Busque no catalogo local e no YouTube. A musica entra na fila do Palco somente depois de preparada.
     </p>
-    <div class="field has-addons">
-      <div class="control is-expanded">
-        <input
-          id="prepare-search-input"
-          class="input"
-          type="text"
-          value="{{ search_string or '' }}"
-          placeholder="Artista - musica"
-        />
+    <form id="prepare-search-form" action="{{ url_for('prepare.prepare') }}" method="get">
+      <div class="field has-addons">
+        <div class="control is-expanded">
+          <input
+            id="prepare-search-input"
+            name="search_string"
+            class="input"
+            type="text"
+            value="{{ search_string or '' }}"
+            placeholder="Artista - musica"
+            autocomplete="off"
+          />
+        </div>
+        <div class="control">
+          <button id="prepare-search-button" class="button is-warning" type="submit">Buscar</button>
+        </div>
       </div>
-      <div class="control">
-        <button id="prepare-search-button" class="button is-warning">Buscar</button>
-      </div>
-    </div>
-    <form id="prepare-search-form" action="{{ url_for('prepare.prepare') }}" method="get" hidden>
-      <input id="prepare-search-hidden" name="search_string" />
+      <input name="search_count" type="hidden" value="{{ search_count or 10 }}" />
     </form>
   </section>
 
-  {% if search_results %}
-  <section class="prepare-panel">
-    <h2 class="title is-5">Resultados para "{{ search_string }}"</h2>
-    {% for title,url,id,channel,duration in search_results %}
-    <div class="prepare-result">
-      <div class="prepare-thumb">
-        <img src="https://img.youtube.com/vi/{{ id }}/mqdefault.jpg" alt="" />
-      </div>
-      <div>
-        <strong>{{ title }}</strong>
-        {% if channel %}<div class="is-size-7 has-text-grey">{{ channel }}</div>{% endif %}
-        {% if duration %}<div class="is-size-7 has-text-grey">Duracao: {{ duration }}</div>{% endif %}
-        <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="is-size-7 has-text-info">
-          YouTube
-        </a>
-      </div>
-      <button
-        class="button is-primary prepare-youtube-button"
-        data-url="{{ url }}"
-        data-title="{{ title }}"
-      >
-        Preparar
-      </button>
+  <section class="prepare-panel" id="prepare-processing-panel">
+    <div class="prepare-panel-header">
+      <h2 class="title is-5 mb-0">Fila de processamento</h2>
+      <span class="tag is-light">download + analise em serie</span>
     </div>
-    {% endfor %}
+    <div id="prepare-processing-list">
+      {% if processing_queue %}
+        {% for item in processing_queue %}
+        <div class="prepare-queue-item">
+          <div class="prepare-queue-header">
+            <strong>{{ item.display_title }}</strong>
+            <span class="tag {% if item.job_status == 'running' or item.track_status == 'processing' %}is-warning{% else %}is-info{% endif %}">
+              {{ item.job_status or item.track_status }}
+            </span>
+          </div>
+          <div class="is-size-7 has-text-grey-light">
+            Etapa: {{ item.stage }} · {{ "%.0f"|format(item.progress or 0) }}%
+            {% if item.error %} · {{ item.error }}{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="has-text-grey-light">Nenhum processamento em andamento.</p>
+      {% endif %}
+    </div>
   </section>
-  {% endif %}
 
+  {% if search_string %}
   <section class="prepare-panel">
-    <h2 class="title is-5">Catalogo do Palco</h2>
-    {% if tracks %}
-      {% for track in tracks %}
-      {% set latest = track.latest_job %}
-      <div class="prepare-track">
-        <div class="prepare-track-header">
+    <div class="prepare-search-meta">
+      <h2 class="title is-5 mb-0">Resultados para "{{ search_string }}"</h2>
+      <span class="tag is-info is-light">{{ search_count }} resultados do YouTube</span>
+    </div>
+
+    <div class="prepare-results-group">
+      <h3 class="prepare-results-title">No catalogo local</h3>
+      {% if local_track_results or local_file_results %}
+        {% for track in local_track_results %}
+        <div class="prepare-result prepare-local-result">
           <div>
             <strong>{{ track.display_title }}</strong>
             <div class="is-size-7 has-text-grey">
               {{ track.source_type }}{% if track.file_path %} · {{ track.file_path }}{% endif %}
             </div>
+            {% if track.latest_job %}
+            <div class="is-size-7 has-text-grey-light">
+              Etapa: {{ track.latest_job.stage }} · {{ track.latest_job.status }} · {{ "%.0f"|format(track.latest_job.progress or 0) }}%
+            </div>
+            {% endif %}
           </div>
-          <span class="tag prepare-status {% if track.status == 'ready' %}is-success{% elif track.status == 'failed' %}is-danger{% elif track.status == 'processing' %}is-warning{% else %}is-info{% endif %}">
-            {{ track.status }}
-          </span>
+          <div class="prepare-actions">
+            <span class="tag {{ 'is-success' if track.status == 'ready' else 'is-warning' if track.status in ['processing', 'needs_review'] else 'is-danger' if track.status == 'failed' else 'is-info' }}">
+              {{ track.status }}
+            </span>
+            {% if track.status == 'ready' %}
+            <button class="button is-small is-primary queue-coach-button" data-track-id="{{ track.id }}">Cantar no Palco</button>
+            {% elif track.status == 'failed' %}
+            <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">Reprocessar</button>
+            {% elif track.status == 'needs_review' %}
+            <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">Corrigir com IA</button>
+            {% endif %}
+          </div>
         </div>
-        {% if latest %}
-        <div class="is-size-7 has-text-grey-light">
-          Etapa: {{ latest.stage }} · {{ latest.status }} · {{ "%.0f"|format(latest.progress or 0) }}%
-          {% if latest.error %} · {{ latest.error }}{% endif %}
+        {% endfor %}
+
+        {% for result in local_file_results %}
+        <div class="prepare-result prepare-local-result">
+          <div>
+            <strong>{{ result.display_title }}</strong>
+            <div class="is-size-7 has-text-grey">{{ result.file_path }}</div>
+          </div>
+          <div class="prepare-actions">
+            <span class="tag is-info">arquivo local</span>
+            <button
+              class="button is-small is-warning prepare-local-button"
+              data-file-path="{{ result.file_path }}"
+            >
+              Preparar
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="has-text-grey-light">Nenhuma musica local encontrada com esse termo.</p>
+      {% endif %}
+    </div>
+
+    <div class="prepare-results-group">
+      <h3 class="prepare-results-title">YouTube</h3>
+      {% if search_results %}
+        {% for title,url,id,channel,duration in search_results %}
+        <div class="prepare-result">
+          <div class="prepare-thumb">
+            <img src="https://img.youtube.com/vi/{{ id }}/mqdefault.jpg" alt="" />
+          </div>
+          <div>
+            <strong>{{ title }}</strong>
+            {% if channel %}<div class="is-size-7 has-text-grey">{{ channel }}</div>{% endif %}
+            {% if duration %}<div class="is-size-7 has-text-grey">Duracao: {{ duration }}</div>{% endif %}
+            <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="is-size-7 has-text-info no-spa">
+              YouTube
+            </a>
+          </div>
+          <button
+            class="button is-primary prepare-youtube-button"
+            data-url="{{ url }}"
+            data-title="{{ title }}"
+          >
+            Preparar
+          </button>
+        </div>
+        {% endfor %}
+        {% if search_count < max_search_count %}
+        <div class="has-text-centered mt-3">
+          <a
+            class="button is-small is-link is-light"
+            href="{{ url_for('prepare.prepare', search_string=search_string, search_count=next_search_count) }}"
+          >
+            Mostrar mais resultados
+          </a>
         </div>
         {% endif %}
-        {% if track.status == 'ready' and track.assets and track.assets.guide_path and (track.assets.instrumental_audio_path or track.assets.original_audio_path) %}
-        <div class="prepare-actions">
-          <button class="button is-small is-primary queue-coach-button" data-track-id="{{ track.id }}">
-            Cantar no Palco
-          </button>
-          <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
-            Corrigir com IA
-          </button>
-          {% if track.assets.has_ai_review_backup %}
-          <button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="{{ track.id }}">
-            Reverter IA
-          </button>
+      {% else %}
+        <p class="has-text-grey-light">Nenhum resultado encontrado no YouTube.</p>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="prepare-panel">
+    <h2 class="title is-5">Catalogo do Palco</h2>
+    <div id="prepare-track-list">
+      {% if tracks %}
+        {% for track in tracks %}
+        {% set latest = track.latest_job %}
+        <div class="prepare-track" data-track-id="{{ track.id }}">
+          <div class="prepare-track-header">
+            <div>
+              <strong>{{ track.display_title }}</strong>
+              <div class="is-size-7 has-text-grey">
+                {{ track.source_type }}{% if track.file_path %} · {{ track.file_path }}{% endif %}
+              </div>
+            </div>
+            <span class="tag prepare-status {% if track.status == 'ready' %}is-success{% elif track.status == 'failed' %}is-danger{% elif track.status == 'processing' or track.status == 'needs_review' %}is-warning{% else %}is-info{% endif %}">
+              {{ track.status }}
+            </span>
+          </div>
+          {% if latest %}
+          <div class="is-size-7 has-text-grey-light">
+            Etapa: {{ latest.stage }} · {{ latest.status }} · {{ "%.0f"|format(latest.progress or 0) }}%
+            {% if latest.error %} · {{ latest.error }}{% endif %}
+          </div>
           {% endif %}
-          <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
-            Reprocessar
-          </button>
-          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
-            Excluir
-          </button>
-          {% if track.assets.instrumental_audio_path %}
-          <span class="tag is-success is-light">instrumental pronto</span>
-          {% else %}
-          <span class="tag is-warning is-light">sem instrumental</span>
+          {% if track.status == 'ready' and track.assets and track.assets.guide_path and (track.assets.instrumental_audio_path or track.assets.original_audio_path) %}
+          <div class="prepare-actions">
+            <button class="button is-small is-primary queue-coach-button" data-track-id="{{ track.id }}">
+              Cantar no Palco
+            </button>
+            <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
+              Corrigir com IA
+            </button>
+            {% if track.assets.has_ai_review_backup %}
+            <button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="{{ track.id }}">
+              Reverter IA
+            </button>
+            {% endif %}
+            <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
+              Reprocessar
+            </button>
+            <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+              Excluir
+            </button>
+            {% if track.assets.instrumental_audio_path %}
+            <span class="tag is-success is-light">instrumental pronto</span>
+            {% else %}
+            <span class="tag is-warning is-light">sem instrumental</span>
+            {% endif %}
+          </div>
+          {% elif track.status == 'needs_review' %}
+          <div class="prepare-actions">
+            <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
+              Corrigir com IA
+            </button>
+            {% if track.assets and track.assets.has_ai_review_backup %}
+            <button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="{{ track.id }}">
+              Reverter IA
+            </button>
+            {% endif %}
+            <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
+              Reprocessar
+            </button>
+            <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+              Excluir
+            </button>
+            <span class="tag is-warning is-light">precisa revisao</span>
+          </div>
+          {% elif track.status == 'failed' %}
+          <div class="prepare-actions">
+            <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
+              Reprocessar
+            </button>
+            <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+              Excluir
+            </button>
+          </div>
+          {% elif track.status not in ['queued', 'processing'] %}
+          <div class="prepare-actions">
+            <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
+              Excluir
+            </button>
+          </div>
           {% endif %}
         </div>
-        {% elif track.status == 'needs_review' %}
-        <div class="prepare-actions">
-          <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
-            Corrigir com IA
-          </button>
-          {% if track.assets and track.assets.has_ai_review_backup %}
-          <button class="button is-small is-warning is-light revert-ai-coach-button" data-track-id="{{ track.id }}">
-            Reverter IA
-          </button>
-          {% endif %}
-          <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
-            Reprocessar
-          </button>
-          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
-            Excluir
-          </button>
-          <span class="tag is-warning is-light">precisa revisão</span>
-        </div>
-        {% elif track.status == 'failed' %}
-        <div class="prepare-actions">
-          <button class="button is-small is-link is-light reanalyze-coach-button" data-track-id="{{ track.id }}">
-            Reprocessar
-          </button>
-          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
-            Excluir
-          </button>
-        </div>
-        {% elif track.status not in ['queued', 'processing'] %}
-        <div class="prepare-actions">
-          <button class="button is-small is-danger is-light delete-coach-button" data-track-id="{{ track.id }}">
-            Excluir
-          </button>
-        </div>
-        {% endif %}
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="has-text-grey-light">Nenhuma musica preparada ainda.</p>
-    {% endif %}
+        {% endfor %}
+      {% else %}
+        <p class="has-text-grey-light">Nenhuma musica preparada ainda.</p>
+      {% endif %}
+    </div>
   </section>
 </div>
 {% endblock %}

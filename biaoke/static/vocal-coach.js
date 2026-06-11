@@ -53,6 +53,10 @@
   const PLAYBACK_DRIFT_SECONDS = 2;
   const NOW_PLAYING_POLL_MS = 2000;
   const PLAYBACK_START_TIMEOUT_MS = 10000;
+  const LYRICS_RETRY_INTERVAL_MS = 1800;
+  const LYRICS_RETRY_MAX_ATTEMPTS = 10;
+  const GUIDE_RETRY_INTERVAL_MS = 2200;
+  const GUIDE_RETRY_MAX_ATTEMPTS = 8;
   const LYRICS_OFFSET_STEP_SECONDS = 0.5;
   const MAX_LYRICS_OFFSET_SECONDS = 120;
   const VOCAL_REFERENCE_VOLUME = 0.48;
@@ -202,6 +206,8 @@
     lyricVocalUnits: [],
     lyricsHaveKaraokeTiming: false,
     lyricsOffsetSeconds: 0,
+    lyricsRetryCount: 0,
+    lyricsRetryAfter: 0,
     activeLyricIndex: -1,
     lastLoadedSubtitleUrl: null,
     currentLyricsKey: null,
@@ -226,6 +232,8 @@
     lyricVocalWordCache: null,
     songMidiRangeCacheKey: null,
     songMidiRangeCache: null,
+    guideRetryCount: 0,
+    guideRetryAfter: 0,
     score: emptyScore(),
     autoStartAttempted: false,
   };
@@ -246,6 +254,14 @@
       "coach-canvas",
       "coach-preset",
       "coach-range",
+      "coach-player-back",
+      "coach-player-pause",
+      "coach-player-pause-icon",
+      "coach-player-stop",
+      "coach-player-repeat",
+      "coach-player-forward",
+      "coach-settings-toggle",
+      "coach-settings-menu",
       "coach-start",
       "coach-reset",
       "coach-fullscreen",
@@ -389,7 +405,7 @@
   }
 
   function selectedMode() {
-    return els["coach-preset"].value;
+    return els["coach-preset"]?.value || "song";
   }
 
   function selectedSequence() {
@@ -1245,6 +1261,114 @@
     setText("coach-lyrics-offset", `${sign}${value.toFixed(1)}s`);
   }
 
+  function resetLoadRetries() {
+    state.lyricsRetryCount = 0;
+    state.lyricsRetryAfter = 0;
+    state.guideRetryCount = 0;
+    state.guideRetryAfter = 0;
+  }
+
+  function scheduleLyricsRetry() {
+    if (state.lyrics.length > 0) {
+      state.lyricsRetryCount = 0;
+      state.lyricsRetryAfter = 0;
+      return;
+    }
+    state.lyricsRetryCount = Math.min(state.lyricsRetryCount + 1, LYRICS_RETRY_MAX_ATTEMPTS);
+    state.lyricsRetryAfter = performance.now() + LYRICS_RETRY_INTERVAL_MS;
+  }
+
+  function shouldRetryLyricsLoad() {
+    return Boolean(state.nowPlaying.now_playing)
+      && state.lyrics.length === 0
+      && state.lyricsRetryCount < LYRICS_RETRY_MAX_ATTEMPTS
+      && performance.now() >= Number(state.lyricsRetryAfter || 0);
+  }
+
+  function scheduleGuideRetry() {
+    if (state.songGuide) {
+      state.guideRetryCount = 0;
+      state.guideRetryAfter = 0;
+      return;
+    }
+    state.guideRetryCount = Math.min(state.guideRetryCount + 1, GUIDE_RETRY_MAX_ATTEMPTS);
+    state.guideRetryAfter = performance.now() + GUIDE_RETRY_INTERVAL_MS;
+  }
+
+  function shouldRetryGuideLoad() {
+    return selectedMode() === "song"
+      && Boolean(state.nowPlaying.now_playing)
+      && !state.songGuide
+      && !state.songGuideLoading
+      && state.guideRetryCount < GUIDE_RETRY_MAX_ATTEMPTS
+      && performance.now() >= Number(state.guideRetryAfter || 0);
+  }
+
+  function setSettingsMenuOpen(open) {
+    const menu = els["coach-settings-menu"];
+    const toggle = els["coach-settings-toggle"];
+    if (!menu || !toggle) return;
+    menu.hidden = !open;
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function updateHeaderMarquees() {
+    window.requestAnimationFrame(() => {
+      document.querySelectorAll(".coach-marquee").forEach((marquee) => {
+        const text = marquee.querySelector(".coach-marquee-text");
+        if (!text) return;
+        marquee.classList.remove("is-overflowing");
+        marquee.style.removeProperty("--marquee-distance");
+        marquee.style.removeProperty("--marquee-duration");
+        if ((text.textContent || "").trim() === "--") return;
+        const distance = Math.ceil(text.scrollWidth - marquee.clientWidth);
+        if (distance <= 8) return;
+        marquee.style.setProperty("--marquee-distance", `${distance + 42}px`);
+        marquee.style.setProperty(
+          "--marquee-duration",
+          `${clamp((distance + marquee.clientWidth) / 42, 12, 30).toFixed(1)}s`
+        );
+        marquee.classList.add("is-overflowing");
+      });
+    });
+  }
+
+  function updatePlayerControls() {
+    const hasSong = Boolean(state.nowPlaying?.now_playing);
+    [
+      "coach-player-back",
+      "coach-player-pause",
+      "coach-player-stop",
+      "coach-player-repeat",
+      "coach-player-forward",
+    ].forEach((id) => {
+      if (els[id]) els[id].disabled = !hasSong;
+    });
+
+    const pauseIcon = els["coach-player-pause-icon"];
+    if (!pauseIcon) return;
+    pauseIcon.classList.toggle("icon-pause", !state.nowPlaying?.is_paused);
+    pauseIcon.classList.toggle("icon-play", Boolean(state.nowPlaying?.is_paused));
+  }
+
+  async function sendPlayerCommand(path) {
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`Player command failed: ${response.status}`);
+      const payload = await readJsonResponse(response);
+      if (payload && payload.state) {
+        await handleNowPlayingUpdate(payload.state);
+      }
+    } catch (error) {
+      console.log("Could not send player command", error);
+    } finally {
+      updatePlayerControls();
+    }
+  }
+
   async function persistLyricsOffset() {
     if (!CONFIG.lyricsOffsetUrl || !state.nowPlaying.now_playing) return;
     try {
@@ -1288,15 +1412,15 @@
 
     if (CONFIG.lyricsUrl) {
       const loadedFromGuide = await loadLyricsGuide();
-      if (loadedFromGuide || !subtitleUrl) return;
+      if (loadedFromGuide || !subtitleUrl) return state.lyrics.length > 0;
     }
 
     if (!subtitleUrl) {
       state.lastLoadedSubtitleUrl = null;
       setLyricsStatus(TEXT.noLyrics, "is-warning");
-      return;
+      return false;
     }
-    if (state.lastLoadedSubtitleUrl === subtitleUrl && state.lyrics.length > 0) return;
+    if (state.lastLoadedSubtitleUrl === subtitleUrl && state.lyrics.length > 0) return true;
 
     state.lastLoadedSubtitleUrl = subtitleUrl;
     setLyricsStatus(TEXT.loadingLyrics, "is-warning");
@@ -1312,9 +1436,10 @@
       clearLyricRenderCaches();
       if (state.lyrics.length === 0) {
         setLyricsStatus(TEXT.noLyrics, "is-warning");
-        return;
+        return false;
       }
       setLyricsStatus(TEXT.lyricsReady, "is-ready");
+      return true;
     } catch (error) {
       console.log("Could not load lyrics", error);
       state.lyrics = [];
@@ -1324,6 +1449,7 @@
       state.activeLyricIndex = -1;
       clearLyricRenderCaches();
       setLyricsStatus(TEXT.lyricsError, "is-danger");
+      return false;
     }
   }
 
@@ -1337,7 +1463,6 @@
       setLyricsOffsetDisplay();
       const qualityMessages = Array.isArray(guide.quality_messages) ? guide.quality_messages : [];
       if (guide.status === "idle" && state.nowPlaying.now_playing) {
-        state.currentLyricsKey = null;
         setLyricsStatus(TEXT.loadingLyrics, "is-warning");
         return true;
       }
@@ -1439,16 +1564,20 @@
 
     if (np.up_next) {
       els["coach-up-next"].classList.add("is-visible");
+      els["coach-up-next"].classList.remove("is-empty");
       setText("coach-up-next-song", np.up_next);
       setText("coach-up-next-singer", np.next_user || "--");
     } else {
       els["coach-up-next"].classList.remove("is-visible");
+      els["coach-up-next"].classList.add("is-empty");
       setText("coach-up-next-song", "--");
       setText("coach-up-next-singer", "--");
     }
 
     const duration = Number(np.now_playing_duration || 0);
     setText("coach-duration", duration > 0 ? `/${formatDuration(duration)}` : "/00:00");
+    updatePlayerControls();
+    updateHeaderMarquees();
   }
 
   async function playCurrentVideo() {
@@ -1526,10 +1655,14 @@
     const nextSongKey = nowPlayingSongKey(nextNowPlaying);
     const songChanged = Boolean(nextNowPlaying.now_playing) && nextSongKey !== previousSongKey;
     state.nowPlaying = nextNowPlaying;
-    if (songChanged) resetSession();
+    if (songChanged) {
+      resetLoadRetries();
+      resetSession();
+    }
     updateSongChrome(state.nowPlaying);
 
     if (!state.nowPlaying.now_playing) {
+      resetLoadRetries();
       clearVideo();
       state.songGuide = null;
       state.songGuideKey = null;
@@ -1541,18 +1674,35 @@
 
     const subtitleUrl = state.nowPlaying.now_playing_subtitle_url || null;
     const lyricsKey = `${state.nowPlaying.now_playing || ""}:${subtitleUrl || ""}`;
-    if (lyricsKey !== state.currentLyricsKey) {
+    if (lyricsKey !== state.currentLyricsKey || shouldRetryLyricsLoad()) {
       state.currentLyricsKey = lyricsKey;
-      await loadLyrics(subtitleUrl);
+      const loadedLyrics = await loadLyrics(subtitleUrl);
+      if (loadedLyrics) {
+        state.lyricsRetryCount = 0;
+        state.lyricsRetryAfter = 0;
+      } else {
+        scheduleLyricsRetry();
+      }
     }
 
     const songKey = nowPlayingSongKey(state.nowPlaying);
-    if (selectedMode() === "song" && !state.songGuideLoading && state.songGuideKey !== songKey) {
+    if (
+      selectedMode() === "song"
+      && !state.songGuideLoading
+      && (state.songGuideKey !== songKey || shouldRetryGuideLoad())
+    ) {
       state.songGuide = null;
       state.songGuideKey = null;
       state.songSync = null;
       setVocalReferenceAvailable(false);
-      loadSongGuide(true);
+      loadSongGuide(true).then((guide) => {
+        if (guide) {
+          state.guideRetryCount = 0;
+          state.guideRetryAfter = 0;
+        } else {
+          scheduleGuideRetry();
+        }
+      });
     }
 
     await loadVideoStream(
@@ -1576,7 +1726,8 @@
     if ((current.now_playing_subtitle_url || "") !== (latest.now_playing_subtitle_url || "")) return true;
     if (Boolean(current.is_paused) !== Boolean(latest.is_paused)) return true;
     if (Number(current.now_playing_duration || 0) !== Number(latest.now_playing_duration || 0)) return true;
-    if (latest.now_playing && state.lyrics.length === 0 && !state.currentLyricsKey) return true;
+    if (latest.now_playing && shouldRetryLyricsLoad()) return true;
+    if (latest.now_playing && shouldRetryGuideLoad()) return true;
     return false;
   }
 
@@ -1683,19 +1834,28 @@
       }
     });
     state.socket.on("pause", () => {
+      state.nowPlaying.is_paused = true;
+      updatePlayerControls();
       getVideoPlayer().pause();
       pauseVocalReferenceAudio();
     });
     state.socket.on("play", () => {
+      state.nowPlaying.is_paused = false;
+      updatePlayerControls();
       playCurrentVideo();
     });
     state.socket.on("skip", () => {
       resetSession();
       clearVideo();
+      state.nowPlaying = {};
+      updatePlayerControls();
     });
     state.socket.on("restart", () => {
       const video = getVideoPlayer();
       video.currentTime = 0;
+      state.nowPlaying.is_paused = false;
+      state.nowPlaying.now_playing_position = 0;
+      updatePlayerControls();
       playCurrentVideo();
     });
     state.socket.on("volume", (value) => {
@@ -1757,11 +1917,6 @@
       console.log("Vocal reference stream failed");
       clearVocalReferenceAudio();
       setVocalReferenceAvailable(false);
-    });
-    window.addEventListener("beforeunload", () => {
-      if (isMediaPlaying(video) && state.isMaster && state.socket) {
-        state.socket.emit("end_song", "coach screen closed");
-      }
     });
   }
 
@@ -4722,6 +4877,34 @@
   }
 
   function setupEvents() {
+    els["coach-settings-toggle"]?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setSettingsMenuOpen(Boolean(els["coach-settings-menu"]?.hidden));
+    });
+    els["coach-settings-menu"]?.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+    document.addEventListener("click", () => {
+      setSettingsMenuOpen(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") setSettingsMenuOpen(false);
+    });
+    els["coach-player-back"]?.addEventListener("click", () => {
+      sendPlayerCommand("/player/previous");
+    });
+    els["coach-player-pause"]?.addEventListener("click", () => {
+      sendPlayerCommand("/player/pause");
+    });
+    els["coach-player-stop"]?.addEventListener("click", () => {
+      sendPlayerCommand("/player/stop");
+    });
+    els["coach-player-repeat"]?.addEventListener("click", () => {
+      sendPlayerCommand("/player/restart");
+    });
+    els["coach-player-forward"]?.addEventListener("click", () => {
+      sendPlayerCommand("/player/next");
+    });
     els["coach-start"].addEventListener("click", () => {
       state.running ? stopCoach() : startCoach();
     });
@@ -4788,6 +4971,7 @@
       drawStageSongRoad(performance.now(), currentTarget(performance.now()), state.latestPitchMidi);
     });
     window.addEventListener("resize", () => {
+      updateHeaderMarquees();
       draw(performance.now(), currentTarget(performance.now()), null);
       drawStageSongRoad(performance.now(), currentTarget(performance.now()), state.latestPitchMidi);
     });
@@ -4808,6 +4992,7 @@
     updateVocalReferenceControl();
     updateFixedLyricsControl();
     updateCoachDifficultyControl();
+    updatePlayerControls();
     updateReadout({ voiced: false }, null, null, 0);
     draw(performance.now(), null, null);
     drawStageSongRoad(performance.now(), null, null);

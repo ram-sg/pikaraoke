@@ -408,8 +408,8 @@
             $('#home').addClass('is-active');
         } else if (path === '/queue') {
             $('#queue').addClass('is-active');
-        } else if (path === '/search') {
-            $('#search').addClass('is-active');
+        } else if (path === '/search' || path === '/prepare') {
+            $('#prepare').addClass('is-active');
         } else if (path === '/browse' || path.startsWith('/browse')) {
             $('#browse').addClass('is-active');
         } else if (path === '/info') {

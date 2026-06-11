@@ -76,6 +76,61 @@ def test_download_lifecycle_updates_track_job_and_assets(tmp_path):
     db.close()
 
 
+def test_search_tracks_matches_prepared_catalog_accent_insensitive(tmp_path):
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    track = db.upsert_coach_track(
+        source_type="youtube",
+        source_url="https://youtube.com/watch?v=abc12345678",
+        source_id="abc12345678",
+        display_title="Secos & Molhados - Sangue Latino",
+        status="ready",
+    )
+    db.create_coach_job(track["id"], stage="write_coach_guide", status="complete", progress=100)
+
+    matches = manager.search_tracks("sangue latino", limit=5)
+
+    assert [match["id"] for match in matches] == [track["id"]]
+    db.close()
+
+
+def test_processing_queue_returns_active_jobs_in_fifo_order(tmp_path):
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    first = db.upsert_coach_track(
+        source_type="youtube",
+        source_url="https://youtube.com/watch?v=11111111111",
+        source_id="11111111111",
+        display_title="First",
+        status="processing",
+    )
+    second = db.upsert_coach_track(
+        source_type="youtube",
+        source_url="https://youtube.com/watch?v=22222222222",
+        source_id="22222222222",
+        display_title="Second",
+        status="queued",
+    )
+    first_job = db.create_coach_job(first["id"], stage="build_guide", status="running", progress=20)
+    second_job = db.create_coach_job(second["id"], stage="acquire", status="queued", progress=0)
+
+    queue = manager.get_processing_queue()
+
+    assert [item["job_id"] for item in queue] == [first_job["id"], second_job["id"]]
+    assert queue[0]["display_title"] == "First"
+    db.close()
+
+
 def test_start_recovers_interrupted_analysis_jobs(tmp_path):
     db = KaraokeDatabase(str(tmp_path / "test.db"))
     manager = CoachPreparationManager(

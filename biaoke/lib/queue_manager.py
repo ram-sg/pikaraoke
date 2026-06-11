@@ -28,6 +28,7 @@ class QueueManager:
         get_available_songs: Callable[[], Any] | None = None,
     ) -> None:
         self.queue: list[dict[str, Any]] = []
+        self.history: list[dict[str, Any]] = []
         self._preferences = preferences
         self._events = events
         self._get_now_playing_user = get_now_playing_user
@@ -250,8 +251,49 @@ class QueueManager:
             return None
 
         song = self.queue.pop(0)
+        self.record_history(song)
         logging.info(f"Popped song from queue: {song['title']}")
         return song
+
+    def record_history(self, song: dict[str, Any]) -> None:
+        """Remember a started song so the player can jump back to it."""
+        if not song:
+            return
+        item = dict(song)
+        if self.history and self._same_song(self.history[-1], item):
+            self.history[-1] = item
+        else:
+            self.history.append(item)
+        if len(self.history) > 30:
+            self.history = self.history[-30:]
+
+    def queue_previous(self, current_song: dict[str, Any] | None = None) -> bool:
+        """Put the previous played song at the front of the queue.
+
+        If a current song is playing, it is placed after the previous song so
+        pressing next after going back returns to the interrupted song.
+        """
+        current = dict(current_song) if current_song else None
+        if current and self.history and self._same_song(self.history[-1], current):
+            self.history.pop()
+
+        if not self.history:
+            logging.warning("No previous song in playback history")
+            return False
+
+        previous = self.history.pop()
+        if current:
+            self.queue.insert(0, current)
+        self.queue.insert(0, previous)
+        self._events.emit("queue_update")
+        self._events.emit("now_playing_update")
+        return True
+
+    def _same_song(self, first: dict[str, Any], second: dict[str, Any]) -> bool:
+        return (
+            first.get("file") == second.get("file")
+            and int(first.get("semitones") or 0) == int(second.get("semitones") or 0)
+        )
 
     def queue_edit(self, song_path: str, action: str) -> bool:
         """Move or remove a song in the queue. Action: 'up', 'down', or 'delete'."""

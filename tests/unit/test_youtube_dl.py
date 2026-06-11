@@ -231,6 +231,14 @@ class TestSearchAndPreviewCommands:
         assert "/tmp/youtube-cookies.txt" in cmd
         assert cmd[-1] == 'ytsearch10:"song"'
 
+    def test_search_result_limit_is_configurable(self):
+        output = b'{"title":"Song","url":"https://youtube.com/watch?v=abc","id":"abc"}\n'
+        with patch("biaoke.lib.youtube_dl.subprocess.check_output", return_value=output) as mock_check:
+            get_search_results("song", limit=30)
+
+        cmd = mock_check.call_args.args[0]
+        assert cmd[-1] == 'ytsearch30:"song"'
+
     @patch("biaoke.lib.youtube_dl.get_installed_js_runtime", return_value=None)
     def test_stream_url_uses_additional_args(self, mock_js):
         result = subprocess.CompletedProcess(

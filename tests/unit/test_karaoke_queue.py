@@ -23,6 +23,39 @@ class TestEnqueue:
 
         assert mock_karaoke.queue_manager.queue[0]["semitones"] == 3
 
+    def test_pop_next_records_playback_history(self, mock_karaoke):
+        """Test that songs popped for playback are remembered."""
+        mock_karaoke.queue_manager.enqueue("/songs/song1---abc.mp4", "User1")
+
+        song = mock_karaoke.queue_manager.pop_next()
+
+        assert song["file"] == "/songs/song1---abc.mp4"
+        assert mock_karaoke.queue_manager.history[-1]["file"] == "/songs/song1---abc.mp4"
+
+    def test_queue_previous_restores_previous_and_preserves_current(self, mock_karaoke):
+        """Test previous-track control reconstructs the front of the queue."""
+        first = {
+            "file": "/songs/song1---abc.mp4",
+            "user": "User1",
+            "title": "song1",
+            "semitones": 0,
+        }
+        second = {
+            "file": "/songs/song2---def.mp4",
+            "user": "User2",
+            "title": "song2",
+            "semitones": 0,
+        }
+        mock_karaoke.queue_manager.record_history(first)
+        mock_karaoke.queue_manager.record_history(second)
+
+        assert mock_karaoke.queue_manager.queue_previous(second) is True
+
+        assert [item["file"] for item in mock_karaoke.queue_manager.queue[:2]] == [
+            "/songs/song1---abc.mp4",
+            "/songs/song2---def.mp4",
+        ]
+
     def test_enqueue_duplicate_song_rejected(self, mock_karaoke):
         """Test that the same song cannot be added twice."""
         mock_karaoke.queue_manager.enqueue("/songs/test---abc123.mp4", "User1")

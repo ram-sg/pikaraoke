@@ -16,6 +16,7 @@ import requests
 from biaoke.lib.events import EventSystem
 from biaoke.lib.karaoke_database import KaraokeDatabase
 from biaoke.lib.lyrics_alignment import ALIGNMENT_SCHEMA, ALIGNMENT_VERSION, with_vocal_activity_alignment
+from biaoke.lib.metadata_parser import remove_accents
 from biaoke.lib.scoring import ScoreAnalysisError, extract_melody_guide_from_media
 from biaoke.lib.song_guide import write_song_guide
 from biaoke.lib.song_guide import guide_path_for_media
@@ -369,6 +370,51 @@ class CoachPreparationManager:
             track["latest_job"] = jobs[0] if jobs else None
             track["assets"] = _coach_assets_with_runtime_flags(self._db.get_coach_assets(track["id"]))
         return tracks
+
+    def search_tracks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Return prepared/preparing tracks matching a user search string."""
+        needle_terms = _prepare_search_terms(query)
+        if not needle_terms:
+            return []
+
+        matches = []
+        for track in self.list_tracks(limit=500):
+            haystack = _prepare_track_search_blob(track)
+            if all(term in haystack for term in needle_terms):
+                matches.append(track)
+
+        matches.sort(key=_prepare_search_track_sort_key)
+        return matches[: max(1, min(int(limit), 100))]
+
+    def get_processing_queue(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return active and queued preparation work in user-facing FIFO order."""
+        queue_items = []
+        for track in self.list_tracks(limit=limit):
+            latest = track.get("latest_job") or {}
+            track_status = str(track.get("status") or "")
+            job_status = str(latest.get("status") or "")
+            if track_status not in {QUEUED_STATUS, PROCESSING_STATUS} and job_status not in {
+                QUEUED_STATUS,
+                "running",
+            }:
+                continue
+            queue_items.append(
+                {
+                    "track_id": track.get("id"),
+                    "display_title": track.get("display_title"),
+                    "track_status": track_status,
+                    "stage": latest.get("stage"),
+                    "job_status": job_status,
+                    "progress": latest.get("progress"),
+                    "error": latest.get("error"),
+                    "job_id": latest.get("id"),
+                    "created_at": latest.get("created_at"),
+                    "updated_at": latest.get("updated_at"),
+                }
+            )
+
+        queue_items.sort(key=_processing_queue_sort_key)
+        return queue_items[: max(1, min(int(limit), 200))]
 
     def get_track_with_assets(self, track_id: int) -> dict[str, Any] | None:
         """Return one coach track with jobs/assets attached."""
@@ -756,6 +802,57 @@ def _coach_assets_with_runtime_flags(assets: dict[str, Any] | None) -> dict[str,
     enriched["ai_review_backup_path"] = str(backup_path) if has_backup else None
     enriched["has_ai_review_backup"] = has_backup
     return enriched
+
+
+def _prepare_search_terms(query: str) -> list[str]:
+    normalized = _normalize_prepare_search(query)
+    return [term for term in normalized.split() if term]
+
+
+def _normalize_prepare_search(text: str | None) -> str:
+    normalized = remove_accents(str(text or "")).casefold()
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _prepare_track_search_blob(track: dict[str, Any]) -> str:
+    assets = track.get("assets") or {}
+    parts = [
+        track.get("display_title"),
+        track.get("artist"),
+        track.get("title"),
+        track.get("source_id"),
+        track.get("source_url"),
+        track.get("file_path"),
+        assets.get("original_audio_path"),
+        assets.get("instrumental_audio_path"),
+    ]
+    return _normalize_prepare_search(" ".join(str(part or "") for part in parts))
+
+
+def _prepare_search_track_sort_key(track: dict[str, Any]) -> tuple[int, str, int]:
+    status_order = {
+        READY_STATUS: 0,
+        NEEDS_REVIEW_STATUS: 1,
+        PROCESSING_STATUS: 2,
+        QUEUED_STATUS: 3,
+        FAILED_STATUS: 4,
+    }
+    return (
+        status_order.get(str(track.get("status") or ""), 9),
+        str(track.get("display_title") or "").casefold(),
+        int(track.get("id") or 0),
+    )
+
+
+def _processing_queue_sort_key(item: dict[str, Any]) -> tuple[int, int]:
+    status_order = {
+        "running": 0,
+        PROCESSING_STATUS: 0,
+        QUEUED_STATUS: 1,
+    }
+    status = str(item.get("job_status") or item.get("track_status") or "")
+    return (status_order.get(status, 9), int(item.get("job_id") or item.get("track_id") or 0))
 
 
 def _ai_review_backup_path(guide_path: Path) -> Path:

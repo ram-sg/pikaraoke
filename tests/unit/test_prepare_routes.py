@@ -48,12 +48,19 @@ def test_prepare_status_route_lists_tracks():
 
     mock_karaoke = MagicMock()
     mock_karaoke.coach_preparation.list_tracks.return_value = [{"id": 1, "status": "queued"}]
+    mock_karaoke.coach_preparation.get_processing_queue.return_value = [
+        {"track_id": 1, "job_status": "queued"}
+    ]
+    mock_karaoke.download_manager.get_downloads_status.return_value = {"active": None, "pending": []}
 
     with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
         response = client.get("/prepare/status")
 
     assert response.status_code == 200
-    assert json.loads(response.data)["tracks"] == [{"id": 1, "status": "queued"}]
+    data = json.loads(response.data)
+    assert data["tracks"] == [{"id": 1, "status": "queued"}]
+    assert data["processing_queue"] == [{"track_id": 1, "job_status": "queued"}]
+    assert data["has_active_preparation"] is True
 
 
 def test_prepare_enqueue_route_queues_playable_coach_asset():

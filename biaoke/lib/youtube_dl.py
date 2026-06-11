@@ -177,19 +177,24 @@ def build_ytdl_download_command(
     return cmd
 
 
-def get_search_results(query: str, additional_args: str | None = None) -> list[list[str]]:
+def get_search_results(
+    query: str,
+    additional_args: str | None = None,
+    limit: int = 10,
+) -> list[list[str]]:
     """Search YouTube for videos matching the query.
 
     Args:
         query: Search query string.
         additional_args: Optional additional command-line arguments as a string.
+        limit: Maximum number of YouTube results to request.
 
     Returns:
         List of [title, url, video_id, channel, duration] for each result.
         Duration is formatted as M:SS; channel and duration may be empty strings.
     """
     logging.info(f"Searching YouTube for: {query}")
-    num_results = 10
+    num_results = max(1, min(int(limit), 50))
     yt_search = f'ytsearch{num_results}:"{query}"'
     cmd = yt_dlp_cmd + ["-j", "--no-playlist", "--flat-playlist"]
     _append_additional_args(cmd, additional_args)
