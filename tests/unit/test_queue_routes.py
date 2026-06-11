@@ -115,6 +115,64 @@ class TestQueueApiContract:
         assert data == []
 
 
+class TestBrowseCoachEnqueue:
+    """Tests for enqueueing local browse results into the stage flow."""
+
+    @patch("biaoke.routes.queue.broadcast_event")
+    @patch("biaoke.routes.queue.get_karaoke_instance")
+    def test_enqueue_prefers_ready_coach_asset(self, mock_get_instance, mock_broadcast, client):
+        mock_karaoke = MagicMock()
+        mock_karaoke.coach_preparation.get_track_for_media_path.return_value = {
+            "id": 7,
+            "status": "ready",
+            "display_title": "Artist - Song",
+        }
+        mock_karaoke.coach_preparation.get_playable_track_asset.return_value = {
+            "path": "/songs/.biaoke-stems/song.instrumental.wav",
+            "title": "Artist - Song",
+        }
+        mock_karaoke.queue_manager.enqueue.return_value = [True, "ok"]
+        mock_get_instance.return_value = mock_karaoke
+
+        response = client.get("/enqueue?song=/songs/song.mp4&user=Ramon")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["success"] == [True, "ok"]
+        assert data["song"] == "Artist - Song"
+        mock_karaoke.queue_manager.enqueue.assert_called_once_with(
+            "/songs/.biaoke-stems/song.instrumental.wav",
+            "Ramon",
+            title="Artist - Song",
+        )
+        mock_karaoke.coach_preparation.register_local_file.assert_not_called()
+        mock_broadcast.assert_called_once_with("queue_update")
+
+    @patch("biaoke.routes.queue.broadcast_event")
+    @patch("biaoke.routes.queue.get_karaoke_instance")
+    def test_enqueue_registers_unprepared_local_file(self, mock_get_instance, mock_broadcast, client):
+        mock_karaoke = MagicMock()
+        mock_karaoke.coach_preparation.get_track_for_media_path.return_value = None
+        mock_karaoke.coach_preparation.register_local_file.return_value = {
+            "track": {"display_title": "song"},
+            "job": {"id": 8},
+        }
+        mock_karaoke.song_manager.display_name_from_path.return_value = "song"
+        mock_get_instance.return_value = mock_karaoke
+
+        response = client.get("/enqueue?song=/songs/song.mp4&user=Ramon")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["success"][0] is True
+        assert "preparo do Palco" in data["success"][1]
+        mock_karaoke.coach_preparation.register_local_file.assert_called_once_with(
+            "/songs/song.mp4"
+        )
+        mock_karaoke.queue_manager.enqueue.assert_not_called()
+        mock_broadcast.assert_called_once_with("queue_update")
+
+
 def _make_queue_item(n: int) -> dict:
     """Create a queue item dict for testing."""
     return {"file": f"/songs/song{n}.mp4", "title": f"Song {n}", "user": f"User{n}", "semitones": 0}

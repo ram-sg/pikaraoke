@@ -1,16 +1,12 @@
-"""Splash screen / player display route."""
+"""Stage/player display routes."""
 
-import shutil
-import subprocess
 from pathlib import Path
 
 import flask_babel
 from flask import jsonify, render_template
 from flask_smorest import Blueprint
 
-from biaoke.karaoke import Karaoke
 from biaoke.lib.current_app import get_karaoke_instance, get_site_name
-from biaoke.lib.raspi_wifi_config import get_raspi_wifi_text
 
 _ = flask_babel.gettext
 
@@ -19,15 +15,9 @@ splash_bp = Blueprint("splash", __name__)
 
 _STATIC_ROOT = Path(__file__).resolve().parents[1] / "static"
 _CACHE_BUST_FILES = (
-    "js/splash.js",
     "vocal-coach.css",
     "vocal-coach.js",
-    "score.css",
-    "score.js",
     "images/biaoke-splash-bg.png",
-    "sounds/applause-xl.mp3",
-    "sounds/boo-soft.mp3",
-    "sounds/boo-strong.mp3",
 )
 
 
@@ -75,7 +65,7 @@ def _parse_stored_phrases(stored: str) -> list[str]:
     return [p.strip() for p in stored.split(sep) if p.strip()]
 
 
-def _get_active_score_phrases(k: Karaoke) -> dict[str, list[str]]:
+def _get_active_score_phrases(k) -> dict[str, list[str]]:
     """Custom phrases if configured; translated built-in defaults otherwise."""
     defaults = _default_score_phrases()
     result = {}
@@ -91,54 +81,20 @@ def get_score_phrases():
     return jsonify(_get_active_score_phrases(get_karaoke_instance()))
 
 
+@splash_bp.route("/palco")
 @splash_bp.route("/splash")
-def splash():
-    """Splash screen / player display for TV output."""
-    k = get_karaoke_instance()
-    site_name = get_site_name()
-    text = ""
-    if k.is_raspberry_pi:
-        has_iwconfig = shutil.which("iwconfig")
-        has_iw = shutil.which("iw")
-        if has_iwconfig or has_iw:
-            # iwconfig is deprecated on Ubuntu, but still available on Raspbian
-            command = "iwconfig" if has_iwconfig else "iw"
-            status = subprocess.run([command, "wlan0"], stdout=subprocess.PIPE).stdout.decode(
-                "utf-8"
-            )
-            if "Mode:Master" in status:
-                # handle raspiwifi connection mode
-                text = get_raspi_wifi_text()
-
-    return render_template(
-        "splash.html",
-        site_title=site_name,
-        blank_page=True,
-        url=k.url,
-        hostap_info=text,
-        hide_url=k.hide_url,
-        show_splash_clock=k.show_splash_clock,
-        hide_overlay=k.hide_overlay,
-        screensaver_timeout=k.screensaver_timeout,
-        disable_bg_music=k.disable_bg_music,
-        disable_bg_video=k.disable_bg_video,
-        disable_score=k.disable_score,
-        enable_mic_monitor=k.enable_mic_monitor,
-        mic_monitor_volume=k.mic_monitor_volume,
-        bg_music_volume=k.bg_music_volume,
-        has_bg_video=k.bg_video_path is not None,
-        static_version=_static_version(),
-    )
-
-
 @splash_bp.route("/coach")
 @splash_bp.route("/splash/coach")
-def vocal_coach():
-    """Real-time vocal coach display."""
+def palco_display():
+    """Biaoke stage display for TV output.
+
+    The legacy PiKaraoke splash route remains as an alias so existing kiosk
+    links land on the Biaoke stage experience.
+    """
     return render_template(
         "vocal_coach.html",
         site_title=get_site_name(),
-        title="Vocal Coach",
+        title="Palco Biaoke",
         blank_page=True,
         static_version=_static_version(),
     )

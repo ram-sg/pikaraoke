@@ -168,5 +168,5 @@ def test_prepare_delete_route_removes_track():
     assert response.status_code == 200
     data = json.loads(response.data)
     assert data["status"] == "ok"
-    assert data["message"] == "Musica removida do Coach."
+    assert data["message"] == "Musica removida do Palco."
     mock_karaoke.coach_preparation.delete_track.assert_called_once_with(7, delete_files=True)

@@ -106,8 +106,8 @@ class TestScorePhrasesEndpoint:
         assert data["low"] == ["Bad", "Terrible"]
 
 
-class TestVocalCoachEndpoint:
-    """Tests for the vocal coach splash variant."""
+class TestPalcoEndpoint:
+    """Tests for the Biaoke stage display and legacy aliases."""
 
     @patch("biaoke.routes.splash.get_site_name", return_value="Biaoke")
     def test_vocal_coach_route_renders_assets(self, mock_get_site_name, client):
@@ -124,13 +124,33 @@ class TestVocalCoachEndpoint:
         assert b'id="coach-song-road"' in response.data
         assert b'id="coach-lyrics-current"' in response.data
         assert b'id="coach-song-progress-fill"' in response.data
-        assert b"Vocal Coach" in response.data
+        assert b"Palco Biaoke" in response.data
         mock_get_site_name.assert_called_once()
 
     @patch("biaoke.routes.splash.get_site_name", return_value="Biaoke")
-    def test_vocal_coach_short_alias(self, mock_get_site_name, client):
+    def test_palco_short_route(self, mock_get_site_name, client):
+        response = client.get("/palco")
+
+        assert response.status_code == 200
+        assert b"vocal-coach.js" in response.data
+        assert b"Palco Biaoke" in response.data
+        mock_get_site_name.assert_called_once()
+
+    @patch("biaoke.routes.splash.get_site_name", return_value="Biaoke")
+    def test_legacy_coach_route_alias(self, mock_get_site_name, client):
         response = client.get("/coach")
 
         assert response.status_code == 200
         assert b"vocal-coach.js" in response.data
+        assert b"Palco Biaoke" in response.data
+        mock_get_site_name.assert_called_once()
+
+    @patch("biaoke.routes.splash.get_site_name", return_value="Biaoke")
+    def test_legacy_splash_route_renders_vocal_coach(self, mock_get_site_name, client):
+        response = client.get("/splash")
+
+        assert response.status_code == 200
+        assert b"vocal-coach.js" in response.data
+        assert b"js/splash.js" not in response.data
+        assert b"/score/guide/current" in response.data
         mock_get_site_name.assert_called_once()

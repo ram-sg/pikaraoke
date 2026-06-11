@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 
 import flask_babel
-from flask import current_app, jsonify, render_template, request, url_for
+from flask import current_app, jsonify, redirect, request, url_for
 from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
-from biaoke.lib.current_app import get_karaoke_instance, get_site_name
-from biaoke.lib.youtube_dl import get_search_results, get_stream_url
+from biaoke.lib.current_app import get_karaoke_instance
+from biaoke.lib.youtube_dl import get_stream_url
 
 _ = flask_babel.gettext
 
@@ -40,27 +40,10 @@ class DownloadBody(Schema):
 
 @search_bp.route("/search", methods=["GET"])
 def search():
-    """YouTube search page."""
-    k = get_karaoke_instance()
-    site_name = get_site_name()
-    search_string = request.args.get("search_string")
-    if search_string:
-        non_karaoke = request.args.get("non_karaoke") == "true"
-        if non_karaoke:
-            search_results = get_search_results(search_string, k.additional_ytdl_args)
-        else:
-            search_results = get_search_results(search_string + " karaoke", k.additional_ytdl_args)
-    else:
-        search_string = None
-        search_results = None
-    return render_template(
-        "search.html",
-        site_title=site_name,
-        title="Search",
-        songs=k.song_manager.songs,
-        search_results=search_results,
-        search_string=search_string,
-    )
+    """Compatibility alias for the unified stage preparation page."""
+    args = request.args.to_dict(flat=True)
+    args.pop("non_karaoke", None)
+    return redirect(url_for("prepare.prepare", **args))
 
 
 @search_bp.route("/autocomplete")
@@ -97,14 +80,18 @@ def preview(query):
 @search_bp.route("/download", methods=["POST"])
 @search_bp.arguments(DownloadBody, location="json")
 def download(form):
-    """Download a video from YouTube."""
+    """Compatibility endpoint that now prepares a stage track instead of raw playback."""
     k = get_karaoke_instance()
     song = form["song_url"]
     user = form["song_added_by"]
     title = form["song_title"]
-    queue = form.get("queue", False)
+    result = k.coach_preparation.prepare_youtube(url=song, title=title, user=user)
 
-    # Queue the download (processed serially by the download worker)
-    k.download_manager.queue_download(song, queue, user, title)
-
-    return jsonify({"status": "ok"})
+    return jsonify(
+        {
+            "status": "ok",
+            "mode": "palco_prepare",
+            "message": "Musica enviada para preparo do Palco.",
+            **result,
+        }
+    )

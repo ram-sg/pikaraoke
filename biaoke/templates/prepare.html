@@ -274,14 +274,13 @@
   });
 </script>
 {% endblock %} {% block header %}
-<h1>{% block title %}Preparar Coach{% endblock %}</h1>
+<h1>{% block title %}Musicas{% endblock %}</h1>
 {% endblock %} {% block content %}
 <div class="prepare-shell">
   <section class="prepare-panel">
-    <h2 class="title is-5">Buscar versao original</h2>
+    <h2 class="title is-5">Buscar musica original</h2>
     <p class="has-text-grey-light mb-3">
-      Use esta tela para baixar/importar a musica e criar o pacote do Coach. Ela nao entra na fila
-      enquanto nao estiver preparada.
+      Busque, baixe e prepare a musica para o Palco. Ela so entra na fila quando o pacote estiver pronto.
     </p>
     <div class="field has-addons">
       <div class="control is-expanded">
@@ -331,7 +330,7 @@
   {% endif %}
 
   <section class="prepare-panel">
-    <h2 class="title is-5">Catalogo Coach</h2>
+    <h2 class="title is-5">Catalogo do Palco</h2>
     {% if tracks %}
       {% for track in tracks %}
       {% set latest = track.latest_job %}
@@ -356,7 +355,7 @@
         {% if track.status == 'ready' and track.assets and track.assets.guide_path and (track.assets.instrumental_audio_path or track.assets.original_audio_path) %}
         <div class="prepare-actions">
           <button class="button is-small is-primary queue-coach-button" data-track-id="{{ track.id }}">
-            Cantar no Coach
+            Cantar no Palco
           </button>
           <button class="button is-small is-warning review-ai-coach-button" data-track-id="{{ track.id }}">
             Corrigir com IA

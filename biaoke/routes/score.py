@@ -207,7 +207,7 @@ def current_lyrics_guide():
 
 @score_bp.route("/score/vocal-reference/current")
 def current_vocal_reference():
-    """Stream the original sung track for the active prepared coach song."""
+    """Stream the original sung track for the active prepared stage song."""
     k = get_karaoke_instance()
     controller = k.playback_controller
     filename = controller.now_playing_filename
@@ -220,11 +220,11 @@ def current_vocal_reference():
 
     coach_guide = _get_coach_guide_for_path(k, path)
     if not coach_guide:
-        return jsonify({"status": "missing", "message": "Faixa original do coach não encontrada."}), 404
+        return jsonify({"status": "missing", "message": "Faixa original do Palco não encontrada."}), 404
 
     source_path = _coach_vocal_reference_path(coach_guide)
     if not source_path or not source_path.is_file():
-        return jsonify({"status": "missing", "message": "Voz original do coach não encontrada."}), 404
+        return jsonify({"status": "missing", "message": "Voz original do Palco não encontrada."}), 404
 
     mimetype = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
     return send_file(

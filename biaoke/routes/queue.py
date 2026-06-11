@@ -190,9 +190,36 @@ def queue_edit(query):
 
 def _do_enqueue(song: str, user: str) -> str:
     k = get_karaoke_instance()
-    rc = k.queue_manager.enqueue(song, user)
+    playable = None
+    coach_track = k.coach_preparation.get_track_for_media_path(song)
+    if coach_track and coach_track.get("status") == "ready":
+        playable = k.coach_preparation.get_playable_track_asset(int(coach_track["id"]))
+
+    if playable:
+        rc = k.queue_manager.enqueue(
+            playable["path"],
+            user,
+            title=playable["title"],
+        )
+        song_title = playable["title"]
+    elif coach_track:
+        status = coach_track.get("status") or _("unknown")
+        rc = [
+            True,
+            "Musica ainda nao esta pronta no Palco: %s" % status,
+        ]
+        song_title = coach_track.get("display_title") or k.song_manager.display_name_from_path(song)
+    else:
+        result = k.coach_preparation.register_local_file(song)
+        track = result.get("track") or {}
+        rc = [
+            True,
+            "Musica enviada para preparo do Palco: %s"
+            % (track.get("display_title") or k.song_manager.display_name_from_path(song)),
+        ]
+        song_title = track.get("display_title") or k.song_manager.display_name_from_path(song)
+
     broadcast_event("queue_update")
-    song_title = k.song_manager.display_name_from_path(song)
     return json.dumps({"song": song_title, "success": rc})
 
 

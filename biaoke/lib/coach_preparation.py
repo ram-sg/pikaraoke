@@ -26,7 +26,7 @@ from biaoke.lib.youtube_dl import get_youtube_id_from_url
 COACH_GUIDE_SCHEMA = "biaoke.coach_guide"
 COACH_GUIDE_VERSION = 1
 COACH_GUIDE_SUFFIX = ".biaoke-coach.json"
-DEFAULT_PREPARE_USER = "Biaoke Coach"
+DEFAULT_PREPARE_USER = "Biaoke Palco"
 FAILED_STATUS = "failed"
 NEEDS_REVIEW_STATUS = "needs_review"
 PROCESSING_STATUS = "processing"
@@ -441,7 +441,7 @@ class CoachPreparationManager:
         assets = track.get("assets") or {}
         guide_path = Path(str(assets.get("guide_path") or ""))
         if not guide_path.is_file():
-            raise ValueError("Guia do Coach nao encontrado para revisar.")
+            raise ValueError("Guia do Palco nao encontrado para revisar.")
 
         job = self._db.create_coach_job(
             track_id,

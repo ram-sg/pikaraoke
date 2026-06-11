@@ -127,10 +127,7 @@
       if (currentPath == "/queue") {
         $("#queue").addClass("is-active")
       }
-      if (currentPath == "/search") {
-        $("#search").addClass("is-active")
-      }
-      if (currentPath == "/prepare") {
+      if (currentPath == "/search" || currentPath == "/prepare") {
         $("#prepare").addClass("is-active")
       }
       if (currentPath == "/browse") {
@@ -218,19 +215,14 @@
           {# MSG: Navigation link for the queue page. #}
           <span>{% trans %}Queue{% endtrans %}</span>
         </a>
-        <a id="search" class="navbar-item" href="{{ url_for('search.search') }}">
-          <i class="icon icon-search-1" title="Search"></i>
-          {# MSG: Navigation link for the search page add songs to the queue. #}
-          <span>{% trans %}Search{% endtrans %}</span>
-        </a>
         <a id="prepare" class="navbar-item" href="{{ url_for('prepare.prepare') }}">
-          <i class="icon icon-list-add" title="Prepare"></i>
-          <span>Preparar</span>
+          <i class="icon icon-search-1" title="Musicas"></i>
+          <span>Musicas</span>
         </a>
         <a id="browse" class="navbar-item" href="{{ url_for('files.browse') }}">
-          <i class="icon icon-folder-open-empty" title="Browse"></i>
+          <i class="icon icon-folder-open-empty" title="Navegar"></i>
           {# MSG: Navigation link for the page where the user can add existing songs to the queue. #}
-          <span>{% trans %}Browse{% endtrans %}</span>
+          <span>Navegar</span>
         </a>
         <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
           <span aria-hidden="true"></span>

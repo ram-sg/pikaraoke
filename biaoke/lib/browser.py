@@ -1,4 +1,4 @@
-"""Browser utilities for launching the splash screen."""
+"""Browser utilities for launching the Biaoke stage display."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class Browser:
     def __init__(
         self, karaoke: Karaoke, window_size: str | None = None, external_monitor: bool = False
     ):
-        """Initialize the browser with the splash screen in kiosk mode.
+        """Initialize the browser with the Biaoke stage display in kiosk mode.
 
         Args:
             karaoke: Karaoke instance with URL and platform configuration.
@@ -37,17 +37,17 @@ class Browser:
         self.external_monitor = external_monitor
         self.browser_process: subprocess.Popen | None = None
         self.browser_profile_dir = os.path.join(get_data_directory(), "browser_profile")
-        self.splash_url = f"{self.karaoke.url}/splash"
+        self.display_url = f"{self.karaoke.url}/palco"
 
     def launch_splash_screen(self) -> subprocess.Popen | None:
-        """Launch the browser with the splash screen in kiosk mode.
+        """Launch the browser with the Biaoke stage display in kiosk mode.
 
         Uses a persistent user data directory to ensure kiosk flags are respected
         even if another browser instance is running, and to preserve cookies
         (such as user name) across restarts. Supports Chrome, Chromium, and Edge
         on Windows, Linux, and macOS.
         """
-        logging.debug(f"Launching splash screen: {self.splash_url}")
+        logging.debug(f"Launching Biaoke stage display: {self.display_url}")
 
         suppress_logs = int(self.karaoke.log_level) > logging.DEBUG
         stdout_dest = subprocess.DEVNULL if suppress_logs else None
@@ -112,7 +112,7 @@ class Browser:
                 # Windowed mode: use --app for minimal UI, --new-window to ensure sizing works
                 cmd.append("--new-window")
                 cmd.append(f"--window-size={self.window_size}")
-                cmd.append(f"--app={self.splash_url}")
+                cmd.append(f"--app={self.display_url}")
             else:
                 cmd.append("--kiosk")
 
@@ -144,7 +144,7 @@ class Browser:
 
             # URL must be last argument for --kiosk mode
             if not self.window_size:
-                cmd.append(self.splash_url)
+                cmd.append(self.display_url)
 
             logging.debug(f"Browser command: {' '.join(cmd)}")
             try:
@@ -155,7 +155,7 @@ class Browser:
             # Fallback: System default browser (without confirm=false since user can interact)
             try:
                 logging.warning("No Kiosk-capable browser found. Opening system default.")
-                webbrowser.open(self.splash_url, new=1, autoraise=True)
+                webbrowser.open(self.display_url, new=1, autoraise=True)
             except webbrowser.Error as e:
                 logging.error(f"Error opening system browser: {e}")
 
