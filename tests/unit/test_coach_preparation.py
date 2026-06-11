@@ -1310,6 +1310,98 @@ def test_review_track_with_ai_applies_revised_lyrics_and_marks_ready(tmp_path):
     db.close()
 
 
+def test_review_track_with_ai_uses_local_transcript_when_lyrics_are_missing(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_REVIEW_PROVIDER", raising=False)
+    monkeypatch.delenv("MIMO_API_KEY", raising=False)
+    monkeypatch.delenv("XIAOMI_MIMO_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    media_path = tmp_path / "Artist - Missing Lyrics.mp4"
+    media_path.write_bytes(b"fake media")
+    guide_path = tmp_path / "Artist - Missing Lyrics.biaoke-coach.json"
+    guide_path.write_text(
+        json.dumps(
+            {
+                "schema": "biaoke.coach_guide",
+                "version": 1,
+                "stems": {
+                    "status": "ready",
+                    "vocals_path": str(tmp_path / "vocals.wav"),
+                    "instrumental_path": str(tmp_path / "instrumental.wav"),
+                },
+                "transcript": {
+                    "status": "ready",
+                    "engine": "faster-whisper",
+                    "words": [
+                        {"word": "won't", "start": 1.0, "end": 1.25, "probability": 0.92},
+                        {"word": "you", "start": 1.28, "end": 1.45, "probability": 0.91},
+                        {"word": "come", "start": 1.48, "end": 1.8, "probability": 0.93},
+                        {"word": "and", "start": 1.85, "end": 2.0, "probability": 0.9},
+                        {"word": "save", "start": 2.05, "end": 2.35, "probability": 0.94},
+                        {"word": "me", "start": 2.4, "end": 2.7, "probability": 0.95},
+                    ],
+                },
+                "lyrics": {"status": "missing", "lines": []},
+                "melody": {
+                    "status": "ready",
+                    "duration_seconds": 8,
+                    "notes": [{"start": 1.0, "end": 2.7, "midi": 60, "confidence": 0.9}],
+                },
+                "quality": {
+                    "status": "needs_review",
+                    "messages": ["needs_lyrics"],
+                    "lyrics_ready": False,
+                    "melody_ready": True,
+                    "vocal_stem_ready": True,
+                },
+                "tasks": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    db = KaraokeDatabase(str(tmp_path / "test.db"))
+    manager = CoachPreparationManager(
+        db=db,
+        events=EventSystem(),
+        download_manager=MagicMock(),
+        download_path=str(tmp_path),
+    )
+    track = db.upsert_coach_track(
+        source_type="local",
+        source_url=str(media_path),
+        source_id=str(media_path),
+        display_title="Artist - Missing Lyrics",
+        file_path=str(media_path),
+        status="needs_review",
+    )
+    db.set_coach_assets(
+        track["id"],
+        original_audio_path=str(media_path),
+        guide_path=str(guide_path),
+        vocal_reference_path=str(tmp_path / "vocals.wav"),
+        instrumental_audio_path=str(tmp_path / "instrumental.wav"),
+    )
+
+    with patch("biaoke.lib.coach_preparation.requests.post") as post_mock:
+        result = manager.review_track_with_ai(track["id"])
+
+    updated_track = db.get_coach_track(track["id"])
+    revised = json.loads(guide_path.read_text(encoding="utf-8"))
+
+    assert result is not None
+    assert updated_track["status"] == "ready"
+    assert updated_track["quality_status"] == "ready"
+    assert post_mock.call_count == 0
+    assert revised["lyrics"]["status"] == "ready"
+    assert revised["lyrics"]["source"] == "local_transcript_review"
+    assert revised["lyrics"]["lines"][0]["text"] == "won't you come and save me"
+    assert revised["lyrics"]["alignment"]["method"] == "local_transcript_review_paint_units"
+    assert revised["lyrics"]["alignment"]["paint_units"][0]["text"] == "won't"
+    assert revised["quality"]["ai_review"]["provider"] == "local_transcript"
+    assert revised["quality"]["ai_review"]["model"] == "faster-whisper"
+    db.close()
+
+
 def test_deepseek_review_uses_pro_model_and_alignment_payload(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)

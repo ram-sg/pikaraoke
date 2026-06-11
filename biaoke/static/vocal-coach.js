@@ -9,6 +9,8 @@
   const STAGE_ROAD_MAX_LOOKAHEAD_SECONDS = 24.0;
   const STAGE_ROAD_HIT_X = 0.22;
   const STAGE_ROAD_MIN_HEIGHT = 300;
+  const STAGE_ROAD_MIN_VISIBLE_HEIGHT = 170;
+  const STAGE_ROAD_LYRIC_BOTTOM_SAFE_PX = 38;
   const LYRIC_SILENCE_CUE_COUNT = 5;
   const LYRIC_SILENCE_MIN_GAP_SECONDS = 0.25;
   const VOCAL_TIMELINE_MIN_SEGMENT_SECONDS = 0.035;
@@ -21,7 +23,10 @@
   const VOCAL_TIMELINE_MAX_TEXT_WIDTH = 240;
   const VOCAL_TIMELINE_MAX_DENSE_RATE = 2.85;
   const VOCAL_TIMELINE_CONTOUR_GAP_SECONDS = 0.48;
+  const VOCAL_TIMELINE_LYRIC_FONT_SIZE = 23;
+  const VOCAL_TIMELINE_LYRIC_MIN_GAP_PX = 9;
   const TRAIL_MIN_CONFIDENCE = 0.52;
+  const VISUAL_CURSOR_MIN_CONFIDENCE = 0.25;
   const REFERENCE_CONTOUR_MIN_CONFIDENCE = 0.38;
   const MAX_REFERENCE_SEGMENT_GAP_SECONDS = 0.28;
   const CONTOUR_TARGET_MAX_GAP_SECONDS = 0.55;
@@ -32,8 +37,15 @@
   const VISUAL_MAX_MIDI = 84;
   const VISUAL_TARGET_REJECT_CENTS = 520;
   const VISUAL_STEP_REJECT_CENTS = 700;
-  const VISUAL_ARTIFACT_CONFIDENCE = 0.82;
   const DEFAULT_PITCH_BANDS_CENTS = [25, 40, 60, 80, 100, 130, 160, 200, 250, 320];
+  const AUTO_START_MIC_DELAY_MS = 650;
+  const SCORE_MIN_TARGET_SECONDS = 1.5;
+  const SCORE_SAMPLE_MAX_DELTA_SECONDS = 0.12;
+  const SCORE_MIN_CURSOR_CONFIDENCE = VISUAL_CURSOR_MIN_CONFIDENCE;
+  const SCORE_TRANSITION_GRACE_SECONDS = 0.14;
+  const SCORE_MIN_PITCH_UNIT_SECONDS = 0.12;
+  const SCORE_LIGHT_PITCH_WEIGHT = 0.68;
+  const SCORE_LIGHT_PITCH_BAND_MULTIPLIER = 1.35;
   const PITCH_BAND_STYLES = [
     { cents: 320, fill: "rgba(207, 77, 67, 0.003)" },
     { cents: 200, fill: "rgba(237, 176, 73, 0.004)" },
@@ -51,6 +63,7 @@
   const VOCAL_REFERENCE_SYNC_DRIFT_SECONDS = 0.75;
   const VOCAL_REFERENCE_SYNC_INTERVAL_MS = 850;
   const FIXED_LYRICS_STORAGE_KEY = "biaoke-coach-fixed-lyrics";
+  const VOCAL_SCORE_STORAGE_KEY = "biaoke-coach-score-justo";
   const LYRIC_ROAD_LANE_COUNT = 3;
   const LYRIC_ROAD_LANE_HEIGHT = 42;
   const LYRIC_ROAD_LANE_GAP_SECONDS = 0.18;
@@ -174,6 +187,7 @@
     vocalReferenceKey: null,
     vocalReferenceLastSyncAt: 0,
     fixedLyricsEnabled: false,
+    fairVocalScoreEnabled: true,
     lyricPhrasesCacheKey: null,
     lyricPhrasesCache: null,
     lyricLaneCacheKey: null,
@@ -186,6 +200,8 @@
     lyricVocalWordCache: null,
     songMidiRangeCacheKey: null,
     songMidiRangeCache: null,
+    score: emptyScore(),
+    autoStartAttempted: false,
   };
 
   const els = {};
@@ -250,6 +266,15 @@
       "coach-reference-toggle",
       "coach-reference-audio",
       "coach-fixed-lyrics-toggle",
+      "coach-vocal-score-toggle",
+      "coach-score-result",
+      "coach-score-close",
+      "coach-score-value",
+      "coach-score-label",
+      "coach-score-pitch",
+      "coach-score-coverage",
+      "coach-score-hit-rate",
+      "coach-score-error",
     ].forEach((id) => {
       els[id] = document.getElementById(id);
     });
@@ -302,6 +327,25 @@
       percent >= 78 ? "#12c79c" : percent >= 55 ? "#edb049" : "#cf4d43";
   }
 
+  function emptyScore() {
+    return {
+      songKey: null,
+      lastSampleAt: null,
+      targetSeconds: 0,
+      voicedSeconds: 0,
+      hitSeconds: 0,
+      scoreSeconds: 0,
+      weightedScore: 0,
+      errorSeconds: 0,
+      weightedAbsCents: 0,
+      sampleCount: 0,
+    };
+  }
+
+  function hideScoreResult() {
+    if (els["coach-score-result"]) els["coach-score-result"].hidden = true;
+  }
+
   function resetSession() {
     state.exerciseStartedAt = performance.now();
     state.lastSegmentKey = null;
@@ -313,6 +357,8 @@
     state.latestPitchHeld = false;
     state.lastAcceptedPitch = null;
     state.metrics = emptyMetrics();
+    state.score = emptyScore();
+    hideScoreResult();
     updateMetricsDisplay(null);
   }
 
@@ -442,6 +488,27 @@
     const toggle = els["coach-fixed-lyrics-toggle"];
     if (toggle) toggle.checked = Boolean(state.fixedLyricsEnabled);
     els["coach-video-container"]?.classList.toggle("has-fixed-lyrics", Boolean(state.fixedLyricsEnabled));
+  }
+
+  function loadFairVocalScorePreference() {
+    try {
+      const stored = localStorage.getItem(VOCAL_SCORE_STORAGE_KEY);
+      state.fairVocalScoreEnabled = stored === null ? true : stored === "1";
+    } catch (_error) {
+      state.fairVocalScoreEnabled = true;
+    }
+  }
+
+  function persistFairVocalScorePreference() {
+    try {
+      localStorage.setItem(VOCAL_SCORE_STORAGE_KEY, state.fairVocalScoreEnabled ? "1" : "0");
+    } catch (_error) {}
+  }
+
+  function updateFairVocalScoreControl() {
+    const toggle = els["coach-vocal-score-toggle"];
+    if (toggle) toggle.checked = Boolean(state.fairVocalScoreEnabled);
+    els["coach-video-container"]?.classList.toggle("has-fair-score", Boolean(state.fairVocalScoreEnabled));
   }
 
   function setVocalReferenceAvailable(available) {
@@ -714,6 +781,7 @@
 
   function referenceTargetAtSongTime(songTime, notes = songGuideNotes(), contour = songGuideContour()) {
     const lyricMatch = lyricLineForSongTime(songTime, 0.12);
+    const scorePolicy = vocalScorePolicyAtSongTime(songTime);
 
     const noteMatch = songNoteAtTime(songTime, notes, 0.35) || bridgedSongNoteAtTime(songTime, notes);
     const contourPoint = contourPointAtSongTime(songTime, contour);
@@ -737,6 +805,7 @@
       source: contourPoint ? "song-contour" : noteMatch?.bridged ? "song-bridge" : "song",
       songTime,
       confidence: contourPoint ? contourPoint.confidence : Number(note.confidence ?? 0.6),
+      scorePolicy,
     };
   }
 
@@ -884,13 +953,37 @@
     const previousAge = previous ? now - previous.time : Infinity;
     const stepDelta = previous ? Math.abs(centsBetweenMidi(pitchMidi, previous.midi)) : 0;
 
-    if (target && targetDelta > VISUAL_TARGET_REJECT_CENTS && result.confidence < VISUAL_ARTIFACT_CONFIDENCE) {
+    if (
+      target &&
+      targetDelta > VISUAL_TARGET_REJECT_CENTS &&
+      result.confidence < 0.58 &&
+      previousAge > VISUAL_PITCH_HOLD_MS
+    ) {
       return false;
     }
     if (previousAge <= VISUAL_PITCH_HOLD_MS && stepDelta > VISUAL_STEP_REJECT_CENTS && result.confidence < 0.88) {
       return false;
     }
     return true;
+  }
+
+  function canShowVisualPitch(pitchMidi, result) {
+    return (
+      Number.isFinite(pitchMidi) &&
+      pitchMidi >= VISUAL_MIN_MIDI &&
+      pitchMidi <= VISUAL_MAX_MIDI &&
+      result &&
+      Number(result.confidence || 0) >= VISUAL_CURSOR_MIN_CONFIDENCE
+    );
+  }
+
+  function pushSingerHistoryPoint(now, midi, result) {
+    state.history.push({
+      time: now,
+      midi,
+      confidence: Number(result?.confidence ?? 1),
+      songTime: selectedMode() === "song" ? songPlaybackTime(now) : null,
+    });
   }
 
   async function readJsonResponse(response) {
@@ -1388,7 +1481,12 @@
   }
 
   async function handleNowPlayingUpdate(np) {
-    state.nowPlaying = np || {};
+    const previousSongKey = nowPlayingSongKey(state.nowPlaying);
+    const nextNowPlaying = np || {};
+    const nextSongKey = nowPlayingSongKey(nextNowPlaying);
+    const songChanged = Boolean(nextNowPlaying.now_playing) && nextSongKey !== previousSongKey;
+    state.nowPlaying = nextNowPlaying;
+    if (songChanged) resetSession();
     updateSongChrome(state.nowPlaying);
 
     if (!state.nowPlaying.now_playing) {
@@ -1475,6 +1573,7 @@
 
   function endCurrentSong(reason) {
     const video = getVideoPlayer();
+    showScoreResult(reason);
     video.pause();
     clearVideo();
     if (state.isMaster && state.socket) {
@@ -1551,6 +1650,7 @@
       playCurrentVideo();
     });
     state.socket.on("skip", () => {
+      resetSession();
       clearVideo();
     });
     state.socket.on("restart", () => {
@@ -1912,6 +2012,124 @@
     setMetric("stability", 100 * clamp(1 - stdDev / 70, 0, 1));
   }
 
+  function scoreForCents(centsError, target, policy = null) {
+    const note = target?.songTime !== undefined ? targetNoteAtSongTime(target.songTime, songGuideNotes(), 0.35) : null;
+    const multiplier = Math.max(0.1, Number(policy?.bandMultiplier || 1));
+    const bands = normalizePitchBands(note?.pitchBandsCents).map((band) => band * multiplier);
+    const cents = Math.abs(Number(centsError));
+    if (!Number.isFinite(cents)) return 0;
+    for (let index = 0; index < bands.length; index++) {
+      if (cents <= bands[index]) return Math.max(0, 100 - index * 10);
+    }
+    return 0;
+  }
+
+  function updateGameScore(result, pitchMidi, pitchHeld, target, now) {
+    if (selectedMode() !== "song") return;
+    const video = getVideoPlayer();
+    if (!target || !state.currentVideoUrl || !video || video.paused || video.ended) {
+      state.score.lastSampleAt = null;
+      return;
+    }
+    const policy = target.scorePolicy || vocalScorePolicyAtSongTime(target.songTime);
+    if (policy.hasUnits && !policy.pitchScore) {
+      state.score.lastSampleAt = now;
+      return;
+    }
+
+    const songKey = nowPlayingSongKey(state.nowPlaying);
+    if (state.score.songKey && state.score.songKey !== songKey) {
+      state.score = emptyScore();
+      hideScoreResult();
+    }
+    if (!state.score.songKey) state.score.songKey = songKey;
+
+    let deltaSeconds = state.score.lastSampleAt ? (now - state.score.lastSampleAt) / 1000 : 1 / 60;
+    state.score.lastSampleAt = now;
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return;
+    deltaSeconds = clamp(deltaSeconds, 1 / 120, SCORE_SAMPLE_MAX_DELTA_SECONDS);
+    const weight = Math.max(0, Number(policy.weight || 1));
+    if (weight <= 0) return;
+    const weightedDelta = deltaSeconds * weight;
+
+    state.score.targetSeconds += weightedDelta;
+    state.score.sampleCount += 1;
+
+    const voiced =
+      result?.voiced &&
+      !pitchHeld &&
+      Number.isFinite(pitchMidi) &&
+      Number(result.confidence || 0) >= SCORE_MIN_CURSOR_CONFIDENCE;
+    if (!voiced) {
+      state.score.scoreSeconds += weightedDelta;
+      return;
+    }
+
+    const centsError = Math.abs(centsBetweenMidi(pitchMidi, target.midi));
+    const sampleScore = scoreForCents(centsError, target, policy);
+    state.score.voicedSeconds += weightedDelta;
+    state.score.scoreSeconds += weightedDelta;
+    state.score.weightedScore += sampleScore * weightedDelta;
+    state.score.errorSeconds += weightedDelta;
+    state.score.weightedAbsCents += centsError * weightedDelta;
+    if (sampleScore >= 80) state.score.hitSeconds += weightedDelta;
+  }
+
+  function finalScoreSummary() {
+    const score = state.score || emptyScore();
+    if (score.targetSeconds < SCORE_MIN_TARGET_SECONDS) {
+      return {
+        available: false,
+        value: null,
+        label: "Sem dados suficientes",
+        pitch: null,
+        coverage: null,
+        hitRate: null,
+        avgError: null,
+      };
+    }
+
+    const value = clamp(score.weightedScore / Math.max(0.001, score.targetSeconds), 0, 100);
+    const pitch = score.voicedSeconds > 0 ? clamp(score.weightedScore / score.voicedSeconds, 0, 100) : 0;
+    const coverage = clamp((100 * score.voicedSeconds) / score.targetSeconds, 0, 100);
+    const hitRate = clamp((100 * score.hitSeconds) / score.targetSeconds, 0, 100);
+    const avgError = score.errorSeconds > 0 ? score.weightedAbsCents / score.errorSeconds : null;
+    return {
+      available: true,
+      value,
+      label: scoreLabel(value),
+      pitch,
+      coverage,
+      hitRate,
+      avgError,
+    };
+  }
+
+  function scoreLabel(value) {
+    if (value >= 92) return "Excelente";
+    if (value >= 82) return "Muito bom";
+    if (value >= 68) return "Bom";
+    if (value >= 50) return "Quase";
+    return "Precisa treinar";
+  }
+
+  function formatScorePercent(value) {
+    return value === null || value === undefined || Number.isNaN(value) ? "--" : `${Math.round(value)}%`;
+  }
+
+  function showScoreResult(reason = "complete") {
+    if (reason !== "complete" || !els["coach-score-result"]) return;
+    const summary = finalScoreSummary();
+    els["coach-score-result"].hidden = false;
+    els["coach-score-value"].textContent = summary.available ? String(Math.round(summary.value)) : "--";
+    els["coach-score-label"].textContent = summary.label;
+    els["coach-score-pitch"].textContent = formatScorePercent(summary.pitch);
+    els["coach-score-coverage"].textContent = formatScorePercent(summary.coverage);
+    els["coach-score-hit-rate"].textContent = formatScorePercent(summary.hitRate);
+    els["coach-score-error"].textContent =
+      summary.avgError === null || Number.isNaN(summary.avgError) ? "--" : `${Math.round(summary.avgError)}c`;
+  }
+
   function updateReadout(result, pitchMidi, target, centsError) {
     if (!result.voiced) {
       els["coach-note"].textContent = "--";
@@ -1932,7 +2150,11 @@
 
     if (target) {
       els["coach-target-note"].textContent = noteName(target.midi);
-      if (String(target.source || "").startsWith("song")) {
+      const policy = target.scorePolicy || vocalScorePolicyAtSongTime(target.songTime);
+      if (policy.hasUnits && !policy.pitchScore) {
+        const label = policy.kind === "transition" ? "Transição" : policy.kind === "silent" ? "Pausa vocal" : "Timing";
+        els["coach-target-state"].textContent = `${label} ${formatClock(target.songTime || 0)}`;
+      } else if (String(target.source || "").startsWith("song")) {
         els["coach-target-state"].textContent = `Música ${formatClock(target.songTime || 0)}`;
       } else {
         els["coach-target-state"].textContent = `${Math.round(target.progress * 100)}%`;
@@ -1951,7 +2173,9 @@
 
   function updateMetrics(result, pitchMidi, target, centsError, now) {
     const active = result.voiced && result.confidence > 0.62;
-    if (target) {
+    const policy = target ? target.scorePolicy || vocalScorePolicyAtSongTime(target.songTime) : null;
+    const scoreableTarget = Boolean(target && (!policy?.hasUnits || policy.pitchScore));
+    if (scoreableTarget) {
       state.metrics.targetFrames++;
       if (active) {
         state.metrics.voicedFrames++;
@@ -1960,12 +2184,12 @@
       updateSegment(target, active, centsError, now);
     }
 
-    if (active) {
+    if (active && scoreableTarget) {
       state.recentErrors.push(centsError);
       if (state.recentErrors.length > 75) state.recentErrors.shift();
     }
 
-    updateMetricsDisplay(target);
+    updateMetricsDisplay(scoreableTarget ? target : null);
   }
 
   function visibleMidiRange(target, pitchMidi) {
@@ -2127,15 +2351,18 @@
 
   function songRoadLayout(width, height) {
     const roadTop = clamp(height * 0.08, 48, 96);
-    const railMin = Math.min(height - 86, roadTop + Math.min(STAGE_ROAD_MIN_HEIGHT, height * 0.52));
-    const railMax = Math.max(railMin, height - 78);
-    const railY = clamp(height * 0.78, railMin, railMax);
-    const roadBottom = Math.max(roadTop + STAGE_ROAD_MIN_HEIGHT, railY - 24);
+    const lyricReserve =
+      LYRIC_ROAD_LANE_HEIGHT * Math.max(0, LYRIC_ROAD_LANE_COUNT - 1) + STAGE_ROAD_LYRIC_BOTTOM_SAFE_PX + 34;
+    const roadMinHeight = clamp(height * 0.48, STAGE_ROAD_MIN_VISIBLE_HEIGHT, STAGE_ROAD_MIN_HEIGHT);
+    const railMin = Math.min(height - lyricReserve, roadTop + Math.min(roadMinHeight, height * 0.52));
+    const railMax = Math.max(railMin, height - lyricReserve);
+    const railY = clamp(height * 0.72, railMin, railMax);
+    const roadBottom = Math.max(roadTop + roadMinHeight, railY - 24);
     const labelInset = clamp(width * 0.018, 16, 32);
     return {
       roadTop,
       roadBottom,
-      roadHeight: Math.max(STAGE_ROAD_MIN_HEIGHT, roadBottom - roadTop),
+      roadHeight: Math.max(roadMinHeight, roadBottom - roadTop),
       railY,
       labelInset,
     };
@@ -2273,6 +2500,112 @@
       if (unit.sustain) return true;
       return ["vowel_sustain", "sonorant_sustain", "fricative_effect"].includes(unit.type) && unit.duration >= 0.22;
     });
+  }
+
+  function isPitchScoreVocalUnit(unit) {
+    const score = String(unit?.score || "").toLowerCase();
+    return score === "pitch_timing" || score === "light_pitch_timing";
+  }
+
+  function isLightPitchVocalUnit(unit) {
+    return String(unit?.score || "").toLowerCase() === "light_pitch_timing";
+  }
+
+  function vocalScorePolicyAtSongTime(songTime) {
+    const time = Number(songTime);
+    const units = normalizedLyricVocalUnits();
+    if (!state.fairVocalScoreEnabled || !Number.isFinite(time) || units.length === 0) {
+      return {
+        hasUnits: false,
+        pitchScore: true,
+        kind: "fallback",
+        weight: 1,
+        bandMultiplier: 1,
+      };
+    }
+
+    let nearestTransitionDistance = Infinity;
+    const active = units.find((unit) => {
+      const start = Number(unit.start);
+      const end = Number(unit.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+      nearestTransitionDistance = Math.min(
+        nearestTransitionDistance,
+        Math.abs(time - start),
+        Math.abs(time - end),
+      );
+      return time >= start && time <= end;
+    });
+
+    if (!active) {
+      const inTransitionGrace = nearestTransitionDistance <= SCORE_TRANSITION_GRACE_SECONDS;
+      return {
+        hasUnits: true,
+        pitchScore: false,
+        kind: inTransitionGrace ? "transition" : "silent",
+        weight: 0,
+        bandMultiplier: 1,
+      };
+    }
+
+    const start = Number(active.start);
+    const end = Number(active.end);
+    const duration = Math.max(0, end - start);
+    const edgeGrace = Math.min(
+      SCORE_TRANSITION_GRACE_SECONDS,
+      Math.max(0.035, duration * 0.24),
+    );
+    if (duration >= SCORE_MIN_PITCH_UNIT_SECONDS + edgeGrace * 2) {
+      const inEdgeGrace = time - start < edgeGrace || end - time < edgeGrace;
+      if (inEdgeGrace) {
+        return {
+          hasUnits: true,
+          unit: active,
+          pitchScore: false,
+          kind: "transition",
+          weight: 0,
+          bandMultiplier: 1,
+        };
+      }
+    }
+
+    if (!isPitchScoreVocalUnit(active)) {
+      return {
+        hasUnits: true,
+        unit: active,
+        pitchScore: false,
+        kind: active.score || active.type || "timing_only",
+        weight: 0,
+        bandMultiplier: 1,
+      };
+    }
+
+    const lightPitch = isLightPitchVocalUnit(active);
+    return {
+      hasUnits: true,
+      unit: active,
+      pitchScore: true,
+      kind: active.score,
+      weight: lightPitch ? SCORE_LIGHT_PITCH_WEIGHT : 1,
+      bandMultiplier: lightPitch ? SCORE_LIGHT_PITCH_BAND_MULTIPLIER : 1,
+    };
+  }
+
+  function pitchScoreFractionForInterval(start, end) {
+    if (!state.fairVocalScoreEnabled) return null;
+    const intervalStart = Number(start);
+    const intervalEnd = Number(end);
+    const units = normalizedLyricVocalUnits();
+    if (!Number.isFinite(intervalStart) || !Number.isFinite(intervalEnd) || intervalEnd <= intervalStart) return null;
+    if (units.length === 0) return null;
+    const duration = intervalEnd - intervalStart;
+    let scoreable = 0;
+    units.forEach((unit) => {
+      if (!isPitchScoreVocalUnit(unit)) return;
+      const overlap = Math.max(0, Math.min(intervalEnd, Number(unit.end)) - Math.max(intervalStart, Number(unit.start)));
+      scoreable += overlap;
+    });
+    return clamp(scoreable / duration, 0, 1);
   }
 
   function visibleLyricSegments(minTime, maxTime) {
@@ -2571,7 +2904,12 @@
       Math.round(pixelsPerSecond * 100),
     ].join("|");
     if (state.lyricVisualCacheKey === cacheKey && state.lyricVisualIntervals) return state.lyricVisualIntervals;
-    const intervals = buildVocalVisualIntervals(ctx, lyricUnits, vocalSubUnits, notes, contour, pixelsPerSecond);
+    const intervals = applyLyricSpacingToVisualIntervals(
+      ctx,
+      buildVocalVisualIntervals(ctx, lyricUnits, vocalSubUnits, notes, contour, pixelsPerSecond),
+      lyricUnits,
+      pixelsPerSecond,
+    );
     state.lyricVisualCacheKey = cacheKey;
     state.lyricVisualIntervals = intervals;
     return intervals;
@@ -2766,6 +3104,115 @@
       rate = hasSustain ? Math.min(rate, denseRate) : Math.max(rate, denseRate);
     }
     return Math.max(4, baseWidth * rate, minimumWidth);
+  }
+
+  function applyLyricSpacingToVisualIntervals(ctx, intervals, lyricUnits, pixelsPerSecond) {
+    if (!intervals.length || !Array.isArray(lyricUnits) || lyricUnits.length < 2) return intervals;
+    const constraints = lyricSpacingConstraints(ctx, lyricUnits);
+    if (!constraints.length) return intervals;
+
+    let adjusted = intervals;
+    for (let pass = 0; pass < 2; pass++) {
+      let changed = false;
+      constraints.forEach((constraint) => {
+        const fromX = visualPositionAtTime(constraint.from, adjusted, pixelsPerSecond);
+        const toX = visualPositionAtTime(constraint.to, adjusted, pixelsPerSecond);
+        const deficit = constraint.requiredWidth - (toX - fromX);
+        if (deficit <= 0.75) return;
+        adjusted = addVisualWidthBetweenTimes(adjusted, constraint.from, constraint.to, deficit);
+        changed = true;
+      });
+      if (!changed) break;
+    }
+    return adjusted;
+  }
+
+  function lyricSpacingConstraints(ctx, lyricUnits) {
+    const unitsByLine = new Map();
+    lyricUnits.forEach((unit) => {
+      const text = String(unit?.text || "").trim();
+      const start = Number(unit?.start);
+      if (!text || !Number.isFinite(start)) return;
+      const lineIndex = Number(unit.lineIndex ?? 0);
+      if (!unitsByLine.has(lineIndex)) unitsByLine.set(lineIndex, []);
+      unitsByLine.get(lineIndex).push({
+        start,
+        segmentIndex: Number(unit.segmentIndex ?? 0),
+        text,
+      });
+    });
+
+    const constraints = [];
+    ctx.save();
+    ctx.font = `900 ${VOCAL_TIMELINE_LYRIC_FONT_SIZE}px sans-serif`;
+    const minGap = Math.max(VOCAL_TIMELINE_LYRIC_MIN_GAP_PX, ctx.measureText(" ").width * 0.9);
+    unitsByLine.forEach((units) => {
+      const sorted = units.sort((a, b) => a.segmentIndex - b.segmentIndex || a.start - b.start);
+      let previous = null;
+      sorted.forEach((unit) => {
+        const width = ctx.measureText(unit.text).width;
+        if (previous && unit.start > previous.start + 0.012) {
+          constraints.push({
+            from: previous.start,
+            to: unit.start,
+            requiredWidth: previous.width + minGap,
+          });
+        }
+        previous = { start: unit.start, width };
+      });
+    });
+    ctx.restore();
+    return constraints.sort((a, b) => a.to - b.to || a.from - b.from);
+  }
+
+  function addVisualWidthBetweenTimes(intervals, start, end, extraWidth) {
+    const extra = Math.max(0, Number(extraWidth) || 0);
+    if (!extra) return intervals;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start + 0.012) {
+      return addVisualWidthBeforeTime(intervals, end, extra);
+    }
+
+    const overlaps = intervals.map((interval) =>
+      Math.max(0, Math.min(end, interval.end) - Math.max(start, interval.start))
+    );
+    const totalOverlap = overlaps.reduce((sum, overlap) => sum + overlap, 0);
+    if (totalOverlap <= 0.001) {
+      return addVisualWidthBeforeTime(intervals, end, extra);
+    }
+
+    const additions = overlaps.map((overlap) => (overlap > 0 ? extra * (overlap / totalOverlap) : 0));
+    return reflowVisualIntervals(intervals, additions);
+  }
+
+  function addVisualWidthBeforeTime(intervals, time, extraWidth) {
+    if (!intervals.length) return intervals;
+    const additions = Array.from({ length: intervals.length }, () => 0);
+    let targetIndex = -1;
+    for (let index = intervals.length - 1; index >= 0; index--) {
+      if (intervals[index].end <= time + 0.001) {
+        targetIndex = index;
+        break;
+      }
+    }
+    if (targetIndex < 0) {
+      targetIndex = intervals.findIndex((interval) => interval.start <= time && interval.end >= time);
+    }
+    additions[Math.max(0, targetIndex)] = Math.max(0, Number(extraWidth) || 0);
+    return reflowVisualIntervals(intervals, additions);
+  }
+
+  function reflowVisualIntervals(intervals, additions = []) {
+    let cursor = 0;
+    return intervals.map((interval, index) => {
+      const width = Math.max(0, interval.visualEnd - interval.visualStart) + Math.max(0, additions[index] || 0);
+      const next = {
+        ...interval,
+        visualStart: cursor,
+        visualEnd: cursor + width,
+      };
+      cursor = next.visualEnd;
+      return next;
+    });
   }
 
   function timelineSegmentKind(activeEvents) {
@@ -3467,12 +3914,32 @@
   }
 
   function graphPitchPoint(point, notes, contour = songGuideContour()) {
-    if (!point || Number(point.confidence ?? 1) < TRAIL_MIN_CONFIDENCE) return null;
+    if (!point || Number(point.confidence ?? 1) < VISUAL_CURSOR_MIN_CONFIDENCE) return null;
     const songTime = Number(point.songTime);
     const midi = Number(point.midi);
     if (!Number.isFinite(songTime) || !Number.isFinite(midi)) return null;
     const target = referenceTargetAtSongTime(songTime, notes, contour);
-    if (!target || !Number.isFinite(Number(target.midi))) return null;
+    if (!target || !Number.isFinite(Number(target.midi))) {
+      return {
+        songTime,
+        cents: Number.NaN,
+        midi,
+        rawMidi: midi,
+        raw: true,
+      };
+    }
+    const policy = target.scorePolicy || vocalScorePolicyAtSongTime(songTime);
+    if (policy.hasUnits && !policy.pitchScore) {
+      return {
+        songTime,
+        cents: Number.NaN,
+        midi,
+        rawMidi: midi,
+        raw: true,
+        noPitchScore: true,
+        scoreKind: policy.kind,
+      };
+    }
 
     const targetMidi = Number(target.midi);
     const targetNote = targetNoteAtSongTime(songTime, notes, 0.35);
@@ -3493,6 +3960,8 @@
     if (!Number.isFinite(songTime) || !Number.isFinite(midi)) return null;
     const target = referenceTargetAtSongTime(songTime, notes, contour);
     if (!target || !Number.isFinite(Number(target.midi))) return null;
+    const policy = target.scorePolicy || vocalScorePolicyAtSongTime(songTime);
+    if (policy.hasUnits && !policy.pitchScore) return null;
 
     const targetMidi = Number(target.midi);
     const targetNote = targetNoteAtSongTime(songTime, notes, 0.3);
@@ -3509,6 +3978,8 @@
       const start = Number(note.start);
       const end = Number(note.end);
       const midi = Number(note.midi);
+      const scoreFraction = pitchScoreFractionForInterval(start, end);
+      if (scoreFraction !== null && scoreFraction <= 0.05) return;
       const x1 = Math.max(-48, xForTime(start));
       const x2 = Math.min(layout.width + 48, xForTime(end));
       const width = Math.max(3, x2 - x1);
@@ -3543,9 +4014,11 @@
       const blockY = y - blockHeight / 2;
       const isCurrent = songTime >= start && songTime <= end;
       const isDone = songTime > end;
+      const scoreFraction = pitchScoreFractionForInterval(start, end);
+      const noPitchScore = scoreFraction !== null && scoreFraction <= 0.05;
 
       if (previous && start - previous.end <= 1.35) {
-        ctx.strokeStyle = "rgba(246, 243, 234, 0.055)";
+        ctx.strokeStyle = noPitchScore ? "rgba(246, 243, 234, 0.026)" : "rgba(246, 243, 234, 0.055)";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(previous.x, previous.y);
@@ -3558,23 +4031,35 @@
       const innerTop = clampRoadY(yForMidi(midi + 0.5), layout);
       const innerBottom = clampRoadY(yForMidi(midi - 0.5), layout);
 
-      ctx.fillStyle = "rgba(237, 176, 73, 0.012)";
+      ctx.fillStyle = noPitchScore ? "rgba(246, 243, 234, 0.004)" : "rgba(237, 176, 73, 0.012)";
       drawRoundRect(ctx, x1, Math.min(outerTop, outerBottom), width, Math.max(6, Math.abs(outerBottom - outerTop)), 10);
       ctx.fill();
 
-      ctx.fillStyle = isCurrent ? "rgba(18, 199, 156, 0.055)" : "rgba(18, 199, 156, 0.025)";
+      ctx.fillStyle = noPitchScore
+        ? "rgba(246, 243, 234, 0.012)"
+        : isCurrent
+          ? "rgba(18, 199, 156, 0.055)"
+          : "rgba(18, 199, 156, 0.025)";
       drawRoundRect(ctx, x1, Math.min(innerTop, innerBottom), width, Math.max(4, Math.abs(innerBottom - innerTop)), 8);
       ctx.fill();
 
-      ctx.fillStyle = isCurrent
-        ? "rgba(246, 243, 234, 0.34)"
-        : isDone
-          ? "rgba(18, 199, 156, 0.1)"
-          : "rgba(155, 230, 214, 0.16)";
+      ctx.fillStyle = noPitchScore
+        ? isCurrent
+          ? "rgba(246, 243, 234, 0.18)"
+          : "rgba(246, 243, 234, 0.055)"
+        : isCurrent
+          ? "rgba(246, 243, 234, 0.34)"
+          : isDone
+            ? "rgba(18, 199, 156, 0.1)"
+            : "rgba(155, 230, 214, 0.16)";
       drawRoundRect(ctx, x1, blockY, width, blockHeight, Math.min(9, blockHeight / 2));
       ctx.fill();
 
-      ctx.strokeStyle = isCurrent ? "rgba(246, 243, 234, 0.2)" : "rgba(246, 243, 234, 0.055)";
+      ctx.strokeStyle = noPitchScore
+        ? "rgba(246, 243, 234, 0.04)"
+        : isCurrent
+          ? "rgba(246, 243, 234, 0.2)"
+          : "rgba(246, 243, 234, 0.055)";
       ctx.lineWidth = isCurrent ? 2 : 1;
       drawRoundRect(ctx, x1, blockY, width, blockHeight, Math.min(9, blockHeight / 2));
       ctx.stroke();
@@ -3647,6 +4132,8 @@
       const nextTime = Number(next?.time);
       const gap = Number.isFinite(nextTime) ? nextTime - start : 0;
       const end = gap > 0 && gap <= CONTOUR_TARGET_MAX_GAP_SECONDS ? nextTime : start + 0.14;
+      const policy = vocalScorePolicyAtSongTime(start);
+      if (policy.hasUnits && !policy.pitchScore) return;
       const x1 = Math.max(-48, xForTime(start));
       const x2 = Math.min(layout.width + 48, xForTime(end));
       const width = Math.max(6, x2 - x1);
@@ -3853,32 +4340,39 @@
     ctx.lineWidth = 1;
 
     drawSingerTrail(ctx, xForTime, yForMidi, layout, minTime, maxTime, notes, contour, songTime);
+    drawStageLyricRail(ctx, width, xForTime, songTime, layout.railY, minTime, maxTime, hitX, contour, notes);
+    drawLivePitchCursor(ctx, hitX, yForMidi, layout, songTime, pitchMidi, target, notes, contour);
+    ctx.restore();
+  }
 
+  function drawLivePitchCursor(ctx, hitX, yForMidi, layout, songTime, pitchMidi, target, notes, contour) {
     if (Number.isFinite(pitchMidi)) {
       const livePoint = graphPitchPoint({ songTime, midi: pitchMidi, confidence: 1 }, notes, contour);
-      if (livePoint) {
-        const y = clampRoadY(yForMidi(livePoint.midi), layout);
-        const isHeld = Boolean(state.latestPitchHeld);
-        ctx.globalAlpha = isHeld ? 0.72 : 1;
-        ctx.fillStyle = trailColorForCents(livePoint.cents);
-        ctx.strokeStyle = "rgba(246, 243, 234, 0.98)";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.arc(hitX, y, isHeld ? 8 : 12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.lineWidth = 1;
-      }
-    } else if (target) {
-      const y = yForMidi(target.midi);
-      ctx.strokeStyle = "rgba(237, 176, 73, 0.48)";
+      if (!livePoint) return;
+      const y = clampRoadY(yForMidi(livePoint.midi), layout);
+      const isHeld = Boolean(state.latestPitchHeld);
+      ctx.save();
+      ctx.globalAlpha = isHeld ? 0.72 : 1;
+      ctx.fillStyle = trailColorForCents(livePoint.cents);
+      ctx.strokeStyle = "rgba(246, 243, 234, 0.98)";
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(hitX, y, 9, 0, Math.PI * 2);
+      ctx.arc(hitX, y, isHeld ? 8 : 12, 0, Math.PI * 2);
+      ctx.fill();
       ctx.stroke();
+      ctx.restore();
+      return;
     }
-
-    drawStageLyricRail(ctx, width, xForTime, songTime, layout.railY, minTime, maxTime, hitX, contour, notes);
+    if (!target) return;
+    const policy = target.scorePolicy || vocalScorePolicyAtSongTime(target.songTime);
+    if (policy.hasUnits && !policy.pitchScore) return;
+    const y = yForMidi(target.midi);
+    ctx.save();
+    ctx.strokeStyle = "rgba(237, 176, 73, 0.48)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(hitX, y, 9, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -4025,6 +4519,7 @@
 
     let pitchMidi = null;
     let visualPitchMidi = null;
+    let visualPitchHeld = false;
     let centsError = 0;
     let effectiveResult = result;
     if (result.voiced) {
@@ -4033,6 +4528,7 @@
         ? 1200 * Math.log2(result.frequency / midiToFrequency(target.midi))
         : centsBetweenMidi(detectedPitchMidi, Math.round(detectedPitchMidi));
       const accepted = acceptVisualPitch(detectedPitchMidi, result, target, now);
+      const visible = canShowVisualPitch(detectedPitchMidi, result);
       if (accepted) {
         pitchMidi = detectedPitchMidi;
         centsError = detectedCentsError;
@@ -4043,23 +4539,25 @@
           songTime: selectedMode() === "song" ? songPlaybackTime(now) : null,
           confidence: result.confidence,
         };
-        state.history.push({
-          time: now,
-          midi: detectedPitchMidi,
-          confidence: result.confidence,
-          songTime: selectedMode() === "song" ? songPlaybackTime(now) : null,
-        });
+        pushSingerHistoryPoint(now, detectedPitchMidi, result);
       } else {
-        visualPitchMidi = heldVisualPitch(now);
+        if (visible) {
+          visualPitchMidi = detectedPitchMidi;
+          pushSingerHistoryPoint(now, detectedPitchMidi, result);
+        } else {
+          visualPitchMidi = heldVisualPitch(now);
+          visualPitchHeld = visualPitchMidi !== null;
+        }
         effectiveResult = { ...result, voiced: false, filtered: true };
       }
     } else {
       visualPitchMidi = heldVisualPitch(now);
+      visualPitchHeld = visualPitchMidi !== null;
     }
 
     if (visualPitchMidi !== null) {
       state.latestPitchMidi = visualPitchMidi;
-      state.latestPitchHeld = pitchMidi === null;
+      state.latestPitchHeld = visualPitchHeld;
     } else {
       state.latestPitchMidi = null;
       state.latestPitchHeld = false;
@@ -4067,12 +4565,13 @@
 
     updateReadout(effectiveResult, pitchMidi, target, centsError);
     updateMetrics(effectiveResult, pitchMidi, target, centsError, now);
+    updateGameScore(result, visualPitchMidi, visualPitchHeld, target, now);
     draw(now, target, pitchMidi);
     drawStageSongRoad(now, target, state.latestPitchMidi);
     state.rafId = requestAnimationFrame(tick);
   }
 
-  async function startCoach() {
+  async function startCoach(options = {}) {
     if (state.running) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setStatus(TEXT.unsupported, "is-danger");
@@ -4119,11 +4618,14 @@
     } catch (error) {
       console.log("Vocal coach microphone error", error);
       setStatus(TEXT.micBlocked, "is-danger");
-      stopCoach();
+      stopCoach({ preserveStatus: true });
     }
   }
 
-  function stopCoach() {
+  function stopCoach(options = {}) {
+    const preserveStatus = Boolean(options.preserveStatus);
+    const previousStatusText = els["coach-status"]?.textContent || TEXT.idle;
+    const previousStatusClass = els["coach-status"]?.className || "coach-status";
     state.running = false;
     if (state.rafId) {
       cancelAnimationFrame(state.rafId);
@@ -4150,10 +4652,22 @@
     state.lastAcceptedPitch = null;
     stopSongSync();
     els["coach-start"].textContent = TEXT.start;
-    setStatus(TEXT.idle);
+    if (!preserveStatus) setStatus(TEXT.idle);
     updateReadout({ voiced: false }, null, currentTarget(performance.now()), 0);
+    if (preserveStatus && els["coach-status"]) {
+      els["coach-status"].textContent = previousStatusText;
+      els["coach-status"].className = previousStatusClass;
+    }
     draw(performance.now(), currentTarget(performance.now()), null);
     drawStageSongRoad(performance.now(), currentTarget(performance.now()), null);
+  }
+
+  function scheduleAutoStartCoach() {
+    if (state.autoStartAttempted || state.running) return;
+    state.autoStartAttempted = true;
+    window.setTimeout(() => {
+      if (!state.running) startCoach({ auto: true });
+    }, AUTO_START_MIC_DELAY_MS);
   }
 
   function toggleFullscreen() {
@@ -4168,6 +4682,7 @@
     els["coach-start"].addEventListener("click", () => {
       state.running ? stopCoach() : startCoach();
     });
+    els["coach-score-close"]?.addEventListener("click", hideScoreResult);
     els["coach-reset"].addEventListener("click", () => {
       resetSession();
       if (selectedMode() === "song") {
@@ -4205,6 +4720,14 @@
       updateLyrics(getVideoPlayer().currentTime || 0);
       drawStageSongRoad(performance.now(), currentTarget(performance.now()), state.latestPitchMidi);
     });
+    els["coach-vocal-score-toggle"]?.addEventListener("change", () => {
+      state.fairVocalScoreEnabled = Boolean(els["coach-vocal-score-toggle"].checked);
+      persistFairVocalScorePreference();
+      updateFairVocalScoreControl();
+      state.score = emptyScore();
+      hideScoreResult();
+      drawStageSongRoad(performance.now(), currentTarget(performance.now()), state.latestPitchMidi);
+    });
     els["coach-preset"].addEventListener("change", async () => {
       resetSession();
       stopSongSync();
@@ -4231,6 +4754,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindElements();
     loadFixedLyricsPreference();
+    loadFairVocalScorePreference();
     setupEvents();
     setupVideoEvents();
     setupPlaybackSocket();
@@ -4240,10 +4764,11 @@
     setLyricsOffsetDisplay();
     updateVocalReferenceControl();
     updateFixedLyricsControl();
+    updateFairVocalScoreControl();
     updateReadout({ voiced: false }, null, null, 0);
     draw(performance.now(), null, null);
     drawStageSongRoad(performance.now(), null, null);
-    loadInitialNowPlaying();
+    loadInitialNowPlaying().finally(scheduleAutoStartCoach);
     startNowPlayingPolling();
   });
 })();

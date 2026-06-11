@@ -88,6 +88,11 @@ AI_REVIEW_MAX_LINES = 320
 AI_REVIEW_MAX_PAINT_UNITS = 5000
 AI_REVIEW_MAX_TRANSCRIPT_WORDS = 1200
 AI_REVIEW_MAX_NOTES = 700
+LOCAL_TRANSCRIPT_REVIEW_MIN_WORDS = 4
+LOCAL_TRANSCRIPT_REVIEW_MAX_WORDS_PER_LINE = 7
+LOCAL_TRANSCRIPT_REVIEW_MAX_CHARS_PER_LINE = 42
+LOCAL_TRANSCRIPT_REVIEW_MAX_LINE_SECONDS = 4.8
+LOCAL_TRANSCRIPT_REVIEW_BREAK_GAP_SECONDS = 0.85
 FORCED_ALIGNMENT_MIN_CONFIDENCE = 0.18
 FORCED_ALIGNMENT_MIN_COVERAGE = 0.35
 FORCED_ALIGNMENT_LINE_MIN_TRANSCRIPT_COVERAGE = 0.32
@@ -1958,12 +1963,137 @@ def _lyrics_guide_for_quality(
 
 
 def _review_coach_guide_with_ai(track: dict[str, Any], guide: dict[str, Any]) -> dict[str, Any]:
+    local_review = _local_transcript_review_for_missing_lyrics(track, guide)
+    if local_review:
+        return local_review
+
     provider = _select_ai_review_provider(require_key=True)
+    if provider == "local_transcript":
+        raise ValueError("Transcricao local insuficiente para revisar esta faixa.")
     if provider == "mimo":
         return _review_coach_guide_with_mimo(track, guide)
     if provider == "deepseek":
         return _review_coach_guide_with_deepseek(track, guide)
     raise ValueError(f"{AI_REVIEW_PROVIDER_ENV} invalido: {provider}")
+
+
+def _local_transcript_review_for_missing_lyrics(
+    track: dict[str, Any],
+    guide: dict[str, Any],
+) -> dict[str, Any] | None:
+    lyrics = guide.get("lyrics") if isinstance(guide.get("lyrics"), dict) else {}
+    existing_lines = lyrics.get("lines") if isinstance(lyrics.get("lines"), list) else []
+    if lyrics.get("status") == "ready" and existing_lines:
+        return None
+
+    transcript = guide.get("transcript") if isinstance(guide.get("transcript"), dict) else {}
+    words = _normalized_transcript_review_words(transcript.get("words") or [])
+    if len(words) < LOCAL_TRANSCRIPT_REVIEW_MIN_WORDS:
+        return None
+
+    lines, paint_units = _transcript_words_to_review_lines(words)
+    if not lines or not paint_units:
+        return None
+
+    confidences = [word["confidence"] for word in words if word.get("confidence") is not None]
+    average_confidence = sum(confidences) / len(confidences) if confidences else 0.72
+    confidence = max(0.55, min(0.82, average_confidence))
+    engine = str(transcript.get("engine") or transcript.get("model") or "transcript_words").strip()
+    return {
+        "_provider": "local_transcript",
+        "_model": engine or "transcript_words",
+        "action": "apply",
+        "confidence": round(confidence, 3),
+        "summary": "Legendas criadas localmente a partir da transcricao vocal.",
+        "issues": ["lyrics_missing", "local_transcript_caption_fallback"],
+        "lines": lines,
+        "alignment": {
+            "granularity": "word",
+            "paint_units": paint_units,
+        },
+    }
+
+
+def _normalized_transcript_review_words(words: list[Any]) -> list[dict[str, Any]]:
+    normalized = []
+    for raw_word in words[:AI_REVIEW_MAX_TRANSCRIPT_WORDS]:
+        if not isinstance(raw_word, dict):
+            continue
+        start = _safe_float(raw_word.get("start"))
+        end = _safe_float(raw_word.get("end"))
+        text = _clean_ai_text(raw_word.get("word") or raw_word.get("text"))
+        if start is None or end is None or end <= start or not text:
+            continue
+        if not re.search(r"\w", text, flags=re.UNICODE):
+            continue
+        confidence = _safe_float(raw_word.get("probability"))
+        if confidence is None:
+            confidence = _safe_float(raw_word.get("confidence"))
+        normalized.append(
+            {
+                "start": max(0.0, start),
+                "end": max(0.0, end),
+                "text": text,
+                "confidence": confidence,
+            }
+        )
+    normalized.sort(key=lambda word: (word["start"], word["end"]))
+    return normalized
+
+
+def _transcript_words_to_review_lines(words: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    lines: list[dict[str, Any]] = []
+    paint_units: list[dict[str, Any]] = []
+    current: list[dict[str, Any]] = []
+
+    def flush_current() -> None:
+        if not current:
+            return
+        line_index = len(lines)
+        start = float(current[0]["start"])
+        end = float(current[-1]["end"])
+        text = " ".join(str(word["text"]).strip() for word in current if str(word.get("text") or "").strip())
+        if not text or end <= start + 0.08:
+            current.clear()
+            return
+        lines.append({"start": round(start, 3), "end": round(end, 3), "text": text})
+        for unit_index, word in enumerate(current):
+            paint_units.append(
+                {
+                    "start": round(float(word["start"]), 3),
+                    "end": round(float(word["end"]), 3),
+                    "text": str(word["text"]).strip(),
+                    "line_index": line_index,
+                    "unit_index": unit_index,
+                    "unit_type": "word",
+                }
+            )
+        current.clear()
+
+    for word in words:
+        if current and _should_break_local_transcript_line(current, word):
+            flush_current()
+        current.append(word)
+        if len(current) >= 3 and re.search(r"[.!?;:]$", str(word.get("text") or "")):
+            flush_current()
+    flush_current()
+    return lines, paint_units
+
+
+def _should_break_local_transcript_line(current: list[dict[str, Any]], next_word: dict[str, Any]) -> bool:
+    if not current:
+        return False
+    gap = float(next_word["start"]) - float(current[-1]["end"])
+    if gap >= LOCAL_TRANSCRIPT_REVIEW_BREAK_GAP_SECONDS and len(current) >= 2:
+        return True
+    if len(current) >= LOCAL_TRANSCRIPT_REVIEW_MAX_WORDS_PER_LINE:
+        return True
+    text = " ".join(str(word.get("text") or "").strip() for word in current if str(word.get("text") or "").strip())
+    next_text = str(next_word.get("text") or "").strip()
+    if len(text) + len(next_text) + 1 > LOCAL_TRANSCRIPT_REVIEW_MAX_CHARS_PER_LINE and len(current) >= 2:
+        return True
+    duration = float(next_word["end"]) - float(current[0]["start"])
+    return duration > LOCAL_TRANSCRIPT_REVIEW_MAX_LINE_SECONDS and len(current) >= 2
 
 
 def _review_coach_guide_with_mimo(track: dict[str, Any], guide: dict[str, Any]) -> dict[str, Any]:
@@ -2297,7 +2427,9 @@ def _requested_ai_review_provider() -> str:
         return "mimo"
     if raw_value == "deepseek":
         return "deepseek"
-    raise ValueError(f"{AI_REVIEW_PROVIDER_ENV} invalido. Use auto, mimo ou deepseek.")
+    if raw_value in {"local", "transcript", "local_transcript", "local-transcript", "faster_whisper"}:
+        return "local_transcript"
+    raise ValueError(f"{AI_REVIEW_PROVIDER_ENV} invalido. Use auto, local_transcript, mimo ou deepseek.")
 
 
 def _select_ai_review_provider(*, require_key: bool) -> str:
@@ -2319,6 +2451,8 @@ def _ai_review_provider_label(provider: Any) -> str:
         return "MiMo"
     if normalized == "deepseek":
         return "DeepSeek"
+    if normalized in {"local", "transcript", "local_transcript", "local-transcript", "faster_whisper"}:
+        return "Transcricao local"
     return "IA"
 
 
@@ -2326,11 +2460,15 @@ def _ai_review_provider_slug(provider: Any) -> str:
     normalized = str(provider or "").strip().casefold()
     if normalized in {"mimo", "deepseek"}:
         return normalized
+    if normalized in {"local", "transcript", "local_transcript", "local-transcript", "faster_whisper"}:
+        return "local_transcript"
     return "ai"
 
 
 def _ai_review_tag(provider: Any) -> str:
     slug = _ai_review_provider_slug(provider)
+    if slug == "local_transcript":
+        return "local_transcript_review"
     return f"{slug}_review" if slug == "ai" else f"{slug}_ai_review"
 
 
@@ -2340,6 +2478,8 @@ def _default_ai_review_model(provider: Any) -> str:
         return os.environ.get(MIMO_MODEL_ENV, DEFAULT_MIMO_MODEL)
     if slug == "deepseek":
         return os.environ.get(DEEPSEEK_MODEL_ENV, DEFAULT_DEEPSEEK_MODEL)
+    if slug == "local_transcript":
+        return "transcript_words"
     return ""
 
 

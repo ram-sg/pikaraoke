@@ -79,6 +79,11 @@
         <span>Letra fixa</span>
       </label>
 
+      <label class="coach-toggle-control" title="Ignorar consoantes, transições e pausas naturais no score">
+        <input id="coach-vocal-score-toggle" type="checkbox" />
+        <span>Score justo</span>
+      </label>
+
       <button id="coach-reset" type="button" title="Reiniciar sessão">Reiniciar</button>
       <button id="coach-fullscreen" type="button" title="Tela cheia">Tela cheia</button>
       <button id="coach-start" class="is-primary" type="button">Iniciar</button>
@@ -138,6 +143,33 @@
 
         <div class="coach-song-progress" aria-hidden="true">
           <i id="coach-song-progress-fill"></i>
+        </div>
+
+        <div id="coach-score-result" class="coach-score-result" hidden aria-live="polite">
+          <div class="coach-score-box">
+            <button id="coach-score-close" type="button" title="Fechar resultado">×</button>
+            <span>Resultado</span>
+            <strong id="coach-score-value">--</strong>
+            <small id="coach-score-label">Sem dados suficientes</small>
+            <div class="coach-score-breakdown">
+              <div>
+                <b id="coach-score-pitch">--</b>
+                <small>Afinação</small>
+              </div>
+              <div>
+                <b id="coach-score-coverage">--</b>
+                <small>Cobertura</small>
+              </div>
+              <div>
+                <b id="coach-score-hit-rate">--</b>
+                <small>Acertos</small>
+              </div>
+              <div>
+                <b id="coach-score-error">--</b>
+                <small>Erro médio</small>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
