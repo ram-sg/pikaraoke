@@ -79,9 +79,13 @@
         <span>Letra fixa</span>
       </label>
 
-      <label class="coach-toggle-control" title="Ignorar consoantes, transições e pausas naturais no score">
-        <input id="coach-vocal-score-toggle" type="checkbox" />
-        <span>Score justo</span>
+      <label title="Dificuldade do score vocal">
+        <span>Dificuldade</span>
+        <select id="coach-difficulty">
+          <option value="festa">Festa</option>
+          <option value="treino" selected>Treino</option>
+          <option value="pro">Pro</option>
+        </select>
       </label>
 
       <button id="coach-reset" type="button" title="Reiniciar sessão">Reiniciar</button>

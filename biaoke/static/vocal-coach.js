@@ -42,10 +42,6 @@
   const SCORE_MIN_TARGET_SECONDS = 1.5;
   const SCORE_SAMPLE_MAX_DELTA_SECONDS = 0.12;
   const SCORE_MIN_CURSOR_CONFIDENCE = VISUAL_CURSOR_MIN_CONFIDENCE;
-  const SCORE_TRANSITION_GRACE_SECONDS = 0.14;
-  const SCORE_MIN_PITCH_UNIT_SECONDS = 0.12;
-  const SCORE_LIGHT_PITCH_WEIGHT = 0.68;
-  const SCORE_LIGHT_PITCH_BAND_MULTIPLIER = 1.35;
   const PITCH_BAND_STYLES = [
     { cents: 320, fill: "rgba(207, 77, 67, 0.003)" },
     { cents: 200, fill: "rgba(237, 176, 73, 0.004)" },
@@ -62,11 +58,41 @@
   const VOCAL_REFERENCE_VOLUME = 0.48;
   const VOCAL_REFERENCE_SYNC_DRIFT_SECONDS = 0.75;
   const VOCAL_REFERENCE_SYNC_INTERVAL_MS = 850;
+  const COACH_DIFFICULTY_STORAGE_KEY = "biaoke-coach-difficulty";
   const FIXED_LYRICS_STORAGE_KEY = "biaoke-coach-fixed-lyrics";
   const VOCAL_SCORE_STORAGE_KEY = "biaoke-coach-score-justo";
   const LYRIC_ROAD_LANE_COUNT = 3;
   const LYRIC_ROAD_LANE_HEIGHT = 42;
   const LYRIC_ROAD_LANE_GAP_SECONDS = 0.18;
+  const COACH_DIFFICULTY_PROFILES = {
+    festa: {
+      fairVocalUnits: true,
+      transitionGraceSeconds: 0.22,
+      minPitchUnitSeconds: 0.16,
+      pitchBandMultiplier: 1.45,
+      lightPitchWeight: 0.45,
+      lightPitchBandMultiplier: 1.75,
+      minVoicedScore: 35,
+    },
+    treino: {
+      fairVocalUnits: true,
+      transitionGraceSeconds: 0.14,
+      minPitchUnitSeconds: 0.12,
+      pitchBandMultiplier: 1,
+      lightPitchWeight: 0.68,
+      lightPitchBandMultiplier: 1.35,
+      minVoicedScore: 0,
+    },
+    pro: {
+      fairVocalUnits: false,
+      transitionGraceSeconds: 0.04,
+      minPitchUnitSeconds: 0.08,
+      pitchBandMultiplier: 0.75,
+      lightPitchWeight: 0.9,
+      lightPitchBandMultiplier: 1.05,
+      minVoicedScore: 0,
+    },
+  };
   const CONFIG = window.BiaokeCoachConfig || {};
 
   const TEXT = {
@@ -187,7 +213,7 @@
     vocalReferenceKey: null,
     vocalReferenceLastSyncAt: 0,
     fixedLyricsEnabled: false,
-    fairVocalScoreEnabled: true,
+    coachDifficulty: "treino",
     lyricPhrasesCacheKey: null,
     lyricPhrasesCache: null,
     lyricLaneCacheKey: null,
@@ -266,7 +292,7 @@
       "coach-reference-toggle",
       "coach-reference-audio",
       "coach-fixed-lyrics-toggle",
-      "coach-vocal-score-toggle",
+      "coach-difficulty",
       "coach-score-result",
       "coach-score-close",
       "coach-score-value",
@@ -490,25 +516,39 @@
     els["coach-video-container"]?.classList.toggle("has-fixed-lyrics", Boolean(state.fixedLyricsEnabled));
   }
 
-  function loadFairVocalScorePreference() {
+  function currentDifficultyProfile() {
+    return COACH_DIFFICULTY_PROFILES[state.coachDifficulty] || COACH_DIFFICULTY_PROFILES.treino;
+  }
+
+  function normalizeCoachDifficulty(value) {
+    const key = String(value || "").trim().toLowerCase();
+    return COACH_DIFFICULTY_PROFILES[key] ? key : "treino";
+  }
+
+  function loadCoachDifficultyPreference() {
     try {
-      const stored = localStorage.getItem(VOCAL_SCORE_STORAGE_KEY);
-      state.fairVocalScoreEnabled = stored === null ? true : stored === "1";
+      const stored = localStorage.getItem(COACH_DIFFICULTY_STORAGE_KEY);
+      if (stored) {
+        state.coachDifficulty = normalizeCoachDifficulty(stored);
+        return;
+      }
+      const legacyScoreJusto = localStorage.getItem(VOCAL_SCORE_STORAGE_KEY);
+      state.coachDifficulty = legacyScoreJusto === "0" ? "pro" : "treino";
     } catch (_error) {
-      state.fairVocalScoreEnabled = true;
+      state.coachDifficulty = "treino";
     }
   }
 
-  function persistFairVocalScorePreference() {
+  function persistCoachDifficultyPreference() {
     try {
-      localStorage.setItem(VOCAL_SCORE_STORAGE_KEY, state.fairVocalScoreEnabled ? "1" : "0");
+      localStorage.setItem(COACH_DIFFICULTY_STORAGE_KEY, normalizeCoachDifficulty(state.coachDifficulty));
     } catch (_error) {}
   }
 
-  function updateFairVocalScoreControl() {
-    const toggle = els["coach-vocal-score-toggle"];
-    if (toggle) toggle.checked = Boolean(state.fairVocalScoreEnabled);
-    els["coach-video-container"]?.classList.toggle("has-fair-score", Boolean(state.fairVocalScoreEnabled));
+  function updateCoachDifficultyControl() {
+    const select = els["coach-difficulty"];
+    if (select) select.value = normalizeCoachDifficulty(state.coachDifficulty);
+    els["coach-video-container"]?.setAttribute("data-difficulty", normalizeCoachDifficulty(state.coachDifficulty));
   }
 
   function setVocalReferenceAvailable(available) {
@@ -2066,7 +2106,7 @@
     }
 
     const centsError = Math.abs(centsBetweenMidi(pitchMidi, target.midi));
-    const sampleScore = scoreForCents(centsError, target, policy);
+    const sampleScore = Math.max(Number(policy.minVoicedScore || 0), scoreForCents(centsError, target, policy));
     state.score.voicedSeconds += weightedDelta;
     state.score.scoreSeconds += weightedDelta;
     state.score.weightedScore += sampleScore * weightedDelta;
@@ -2514,13 +2554,15 @@
   function vocalScorePolicyAtSongTime(songTime) {
     const time = Number(songTime);
     const units = normalizedLyricVocalUnits();
-    if (!state.fairVocalScoreEnabled || !Number.isFinite(time) || units.length === 0) {
+    const profile = currentDifficultyProfile();
+    if (!profile.fairVocalUnits || !Number.isFinite(time) || units.length === 0) {
       return {
         hasUnits: false,
         pitchScore: true,
         kind: "fallback",
         weight: 1,
-        bandMultiplier: 1,
+        bandMultiplier: profile.pitchBandMultiplier,
+        minVoicedScore: profile.minVoicedScore,
       };
     }
 
@@ -2538,7 +2580,7 @@
     });
 
     if (!active) {
-      const inTransitionGrace = nearestTransitionDistance <= SCORE_TRANSITION_GRACE_SECONDS;
+      const inTransitionGrace = nearestTransitionDistance <= profile.transitionGraceSeconds;
       return {
         hasUnits: true,
         pitchScore: false,
@@ -2552,10 +2594,10 @@
     const end = Number(active.end);
     const duration = Math.max(0, end - start);
     const edgeGrace = Math.min(
-      SCORE_TRANSITION_GRACE_SECONDS,
+      profile.transitionGraceSeconds,
       Math.max(0.035, duration * 0.24),
     );
-    if (duration >= SCORE_MIN_PITCH_UNIT_SECONDS + edgeGrace * 2) {
+    if (duration >= profile.minPitchUnitSeconds + edgeGrace * 2) {
       const inEdgeGrace = time - start < edgeGrace || end - time < edgeGrace;
       if (inEdgeGrace) {
         return {
@@ -2586,13 +2628,14 @@
       unit: active,
       pitchScore: true,
       kind: active.score,
-      weight: lightPitch ? SCORE_LIGHT_PITCH_WEIGHT : 1,
-      bandMultiplier: lightPitch ? SCORE_LIGHT_PITCH_BAND_MULTIPLIER : 1,
+      weight: lightPitch ? profile.lightPitchWeight : 1,
+      bandMultiplier: profile.pitchBandMultiplier * (lightPitch ? profile.lightPitchBandMultiplier : 1),
+      minVoicedScore: profile.minVoicedScore,
     };
   }
 
   function pitchScoreFractionForInterval(start, end) {
-    if (!state.fairVocalScoreEnabled) return null;
+    if (!currentDifficultyProfile().fairVocalUnits) return null;
     const intervalStart = Number(start);
     const intervalEnd = Number(end);
     const units = normalizedLyricVocalUnits();
@@ -4720,10 +4763,10 @@
       updateLyrics(getVideoPlayer().currentTime || 0);
       drawStageSongRoad(performance.now(), currentTarget(performance.now()), state.latestPitchMidi);
     });
-    els["coach-vocal-score-toggle"]?.addEventListener("change", () => {
-      state.fairVocalScoreEnabled = Boolean(els["coach-vocal-score-toggle"].checked);
-      persistFairVocalScorePreference();
-      updateFairVocalScoreControl();
+    els["coach-difficulty"]?.addEventListener("change", () => {
+      state.coachDifficulty = normalizeCoachDifficulty(els["coach-difficulty"].value);
+      persistCoachDifficultyPreference();
+      updateCoachDifficultyControl();
       state.score = emptyScore();
       hideScoreResult();
       drawStageSongRoad(performance.now(), currentTarget(performance.now()), state.latestPitchMidi);
@@ -4754,7 +4797,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindElements();
     loadFixedLyricsPreference();
-    loadFairVocalScorePreference();
+    loadCoachDifficultyPreference();
     setupEvents();
     setupVideoEvents();
     setupPlaybackSocket();
@@ -4764,7 +4807,7 @@
     setLyricsOffsetDisplay();
     updateVocalReferenceControl();
     updateFixedLyricsControl();
-    updateFairVocalScoreControl();
+    updateCoachDifficultyControl();
     updateReadout({ voiced: false }, null, null, 0);
     draw(performance.now(), null, null);
     drawStageSongRoad(performance.now(), null, null);
