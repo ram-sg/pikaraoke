@@ -452,6 +452,13 @@
     if (el) el.textContent = text;
   }
 
+  function setTextAndTitle(id, text) {
+    const el = els[id];
+    if (!el) return;
+    el.textContent = text;
+    el.title = text;
+  }
+
   function showAutoplayPrompt(show) {
     if (!els["coach-autoplay"]) return;
     els["coach-autoplay"].hidden = !show;
@@ -1552,14 +1559,14 @@
   }
 
   function updateSongChrome(np) {
-    const nowTitle = np.now_playing_title || np.now_playing || "--";
-    const nextTitle = np.up_next_title || np.up_next || "--";
+    const nowTitle = np.now_playing_display || np.now_playing_title || np.now_playing || "--";
+    const nextTitle = np.up_next_display || np.up_next_title || np.up_next || "--";
     if (np.now_playing) {
-      setText("coach-now-playing-song", nowTitle);
-      setText("coach-now-playing-singer", np.now_playing_user || "--");
+      setTextAndTitle("coach-now-playing-song", nowTitle);
+      setText("coach-now-playing-singer", np.now_playing_user ? `Cantando: ${np.now_playing_user}` : "--");
       setText("coach-idle-subtitle", "");
     } else {
-      setText("coach-now-playing-song", "--");
+      setTextAndTitle("coach-now-playing-song", "--");
       setText("coach-now-playing-singer", "--");
       setText("coach-idle-subtitle", TEXT.idleSong);
     }
@@ -1567,12 +1574,12 @@
     if (np.up_next) {
       els["coach-up-next"].classList.add("is-visible");
       els["coach-up-next"].classList.remove("is-empty");
-      setText("coach-up-next-song", nextTitle);
-      setText("coach-up-next-singer", np.next_user || "--");
+      setTextAndTitle("coach-up-next-song", nextTitle);
+      setText("coach-up-next-singer", np.next_user ? `Cantando: ${np.next_user}` : "--");
     } else {
       els["coach-up-next"].classList.remove("is-visible");
       els["coach-up-next"].classList.add("is-empty");
-      setText("coach-up-next-song", "--");
+      setTextAndTitle("coach-up-next-song", "--");
       setText("coach-up-next-singer", "--");
     }
 

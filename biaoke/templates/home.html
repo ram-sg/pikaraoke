@@ -17,7 +17,7 @@
 	function handleNowPlaying(np) {
 		console.log(np);
 		if (np.now_playing) {
-			var nowPlayingTitle = np.now_playing_title || np.now_playing;
+			var nowPlayingTitle = np.now_playing_display || np.now_playing_title || np.now_playing;
 			var nowPlayingHtml = `<p style="margin-bottom: 5px">${nowPlayingTitle}</p>
           <p class="has-text-success" style="margin-bottom: 5px"><i class="icon icon-mic-1" title="Current singer"></i>${np.now_playing_user}</p>`;
 
@@ -38,7 +38,7 @@
 		}
 
 		if (np.up_next) {
-			var upNextTitle = np.up_next_title || np.up_next;
+			var upNextTitle = np.up_next_display || np.up_next_title || np.up_next;
 			$("#up-next").html(`<p style="margin-bottom: 5px">${upNextTitle}</p>
           <p class="has-text-success">
             {# MSG: Title text for the icon marking the next person to sing. #}

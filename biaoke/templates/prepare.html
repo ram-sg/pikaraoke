@@ -377,7 +377,6 @@
 
       $(document).off("click.prepare", ".prepare-youtube-button");
       $(document).on("click.prepare", ".prepare-youtube-button", function () {
-        setUserCookie();
         const button = $(this);
         postJson(
           button,
@@ -385,7 +384,7 @@
           {
             song_url: button.data("url"),
             song_title: button.data("title") || "",
-            song_added_by: getUserCookie() || "",
+            song_added_by: getSelectedSingers(this),
           },
           "Na fila",
           "Nao foi possivel preparar"

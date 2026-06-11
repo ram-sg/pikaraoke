@@ -138,7 +138,7 @@
 
   // Generate now-playing row HTML
   function generateNowPlayingRow(np) {
-    var nowPlayingTitle = np.now_playing_title || np.now_playing;
+    var nowPlayingTitle = np.now_playing_display || np.now_playing_title || np.now_playing;
     var iconSrc = np.is_paused
       ? '{{ url_for("static", filename="images/now-playing.png") }}'
       : '{{ url_for("static", filename="images/now-playing.gif") }}';
@@ -439,7 +439,7 @@
       var np = window.queuePageState.nowPlaying;
       if (!np || !np.now_playing) return;
 
-      $('#np-modal-song-title').text(np.now_playing_title || np.now_playing);
+      $('#np-modal-song-title').text(np.now_playing_display || np.now_playing_title || np.now_playing);
 
       // Update play/pause button based on current state
       if (np.is_paused) {

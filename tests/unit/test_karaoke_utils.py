@@ -98,6 +98,7 @@ class TestGetNowPlaying:
         assert result["is_paused"] is False
         assert result["volume"] == 0.7
         assert result["now_playing_title"] == "Test Song"
+        assert result["now_playing_display"] == "Test Song · TestUser"
 
     def test_get_now_playing_with_queue(self, mock_karaoke):
         """Test now playing shows up_next from queue."""
@@ -107,6 +108,7 @@ class TestGetNowPlaying:
 
         assert result["up_next"] == "Next Song"
         assert result["up_next_title"] == "Next Song"
+        assert result["up_next_display"] == "Next Song · NextUser"
         assert result["next_user"] == "NextUser"
 
     def test_get_now_playing_falls_back_to_filename_when_title_is_singer(self, mock_karaoke):
@@ -119,6 +121,21 @@ class TestGetNowPlaying:
         result = mock_karaoke.get_now_playing()
 
         assert result["now_playing_title"] == "Artist - Song"
+        assert result["now_playing_display"] == "Artist - Song · Ana"
+
+    def test_get_now_playing_next_song_falls_back_when_title_is_singer(self, mock_karaoke):
+        """Test that up next recovers the song title from file when needed."""
+        mock_karaoke.queue_manager.enqueue(
+            "/songs/Artist - Next Song---dQw4w9WgXcQ.mp4",
+            "Bia + Ramon",
+            title="Bia + Ramon",
+        )
+
+        result = mock_karaoke.get_now_playing()
+
+        assert result["up_next"] == "Artist - Next Song"
+        assert result["up_next_title"] == "Artist - Next Song"
+        assert result["up_next_display"] == "Artist - Next Song · Bia + Ramon"
 
 
 class TestResetNowPlaying:

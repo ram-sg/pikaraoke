@@ -470,7 +470,7 @@ body {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   align-content: center;
-  gap: 1px;
+  gap: 3px;
   overflow: hidden;
 }
 
@@ -493,14 +493,7 @@ body {
 
 .coach-now-playing small,
 .coach-up-next small {
-  color: #edb049;
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-  line-height: 1;
+  display: none;
 }
 
 .coach-marquee {

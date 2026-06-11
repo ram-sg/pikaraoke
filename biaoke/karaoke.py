@@ -43,6 +43,15 @@ from biaoke.lib.youtube_dl import (
 from biaoke.version import __version__ as VERSION
 
 
+def _song_display_label(title: Any, singer: Any) -> str | None:
+    """Return a compact label with song and singer for stage headers."""
+    clean_title = str(title).strip() if title else ""
+    clean_singer = str(singer).strip() if singer else ""
+    if clean_title and clean_singer:
+        return f"{clean_title} · {clean_singer}"
+    return clean_title or clean_singer or None
+
+
 class Karaoke:
     """Main karaoke engine managing songs, queue, and playback.
 
@@ -577,17 +586,22 @@ class Karaoke:
             now_title = self.song_manager.display_name_from_path(str(now_file))
 
         next_title = None
+        next_user = next_song["user"] if next_song else None
         if next_song:
             next_title = next_song.get("title") or self.song_manager.display_name_from_path(
                 next_song["file"]
             )
+            if (not next_title or next_title == next_user) and next_song.get("file"):
+                next_title = self.song_manager.display_name_from_path(next_song["file"])
 
         return {
             **playback_state,
             "now_playing_title": now_title,
+            "now_playing_display": _song_display_label(now_title, now_user),
             "up_next": next_title,
             "up_next_title": next_title,
-            "next_user": next_song["user"] if next_song else None,
+            "up_next_display": _song_display_label(next_title, next_user),
+            "next_user": next_user,
             "volume": self.volume,
         }
 

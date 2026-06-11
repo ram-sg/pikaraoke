@@ -88,9 +88,32 @@
       setTimeout(function () {$("#notification-alt").removeClass(categoryClass)}, timeout + 750)
     }
 
+    function splitSingerLabel(label) {
+      return normalizeSingerNames(String(label || "").split(/[,+;]/));
+    }
+
+    function registeredGuestNameSet() {
+      const guestNames = new Set();
+      $(".guest-checkbox").each(function() {
+        const guestName = String($(this).val() || "").trim().toLowerCase();
+        if (guestName) guestNames.add(guestName);
+      });
+      return guestNames;
+    }
+
+    function looksLikeStoredGuestSelection(user) {
+      const guestNames = registeredGuestNameSet();
+      if (!guestNames.size) return false;
+      const names = splitSingerLabel(user);
+      if (!names.length) return false;
+      return names.every(function(name) {
+        return guestNames.has(name.toLowerCase());
+      });
+    }
+
     function setUserCookie(reload=false) {
       var user = Cookies.get("user");
-      if (!user) {
+      if (!user || looksLikeStoredGuestSelection(user)) {
         let name = window.prompt(
           // {# MSG: Prompt which asks the user their name when they first try to add to the queue. #}
           "{{ _('Please enter your name. This will show up next to the songs you queue up from this device.') }}"
@@ -99,7 +122,12 @@
           Cookies.set("user", name, { expires: 3650, path: '/' });
         }
         else {
-          Cookies.set("user", `Anon-${generateRandomString(4)}`, { expires: 3650 });
+          Cookies.set("user", `Anon-${generateRandomString(4)}`, { expires: 3650, path: '/' });
+        }
+        const newUser = Cookies.get("user");
+        if (newUser) {
+          $("#current-user span").text(newUser);
+          $("#current-user").removeClass("is-hidden");
         }
         reload && location.reload();
       }
@@ -135,11 +163,7 @@
       });
       const names = normalizeSingerNames(selected);
       if (names.length) {
-        const label = names.join(" + ");
-        Cookies.set("user", label, { expires: 3650, path: '/' });
-        $("#current-user span").text(label);
-        $("#current-user").removeClass("is-hidden");
-        return label;
+        return names.join(" + ");
       }
       setUserCookie();
       return getUserCookie() || "";
