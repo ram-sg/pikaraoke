@@ -8,6 +8,7 @@ from flask_smorest import Blueprint
 from marshmallow import Schema, fields
 
 from biaoke.lib.current_app import get_karaoke_instance, get_site_name
+from biaoke.lib.guest_manager import format_guest_names
 from biaoke.lib.metadata_parser import remove_accents
 from biaoke.lib.youtube_dl import get_search_results
 
@@ -16,6 +17,13 @@ _ = flask_babel.gettext
 prepare_bp = Blueprint("prepare", __name__)
 DEFAULT_SEARCH_COUNT = 10
 MAX_SEARCH_COUNT = 50
+
+
+def _guest_names(k) -> list[str]:
+    manager = getattr(k, "guest_manager", None)
+    if not manager or not callable(getattr(manager, "list_guests", None)):
+        return []
+    return manager.list_guests()
 
 
 class PrepareYoutubeBody(Schema):
@@ -74,6 +82,7 @@ def prepare():
         tracks=tracks,
         processing_queue=processing_queue,
         has_active_preparation=_has_active_preparation(tracks, processing_queue),
+        guests=_guest_names(k),
     )
 
 
@@ -110,7 +119,7 @@ def enqueue_prepared_track(form):
 
     result = k.queue_manager.enqueue(
         playable["path"],
-        form.get("song_added_by") or "Biaoke Palco",
+        format_guest_names(form.get("song_added_by"), fallback="Biaoke Palco"),
         title=playable["title"],
     )
     return jsonify(

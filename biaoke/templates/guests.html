@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block header %}
+<h1>{% block title %}Guests{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+<section class="mb-5">
+  <form action="{{ url_for('guests.add_guest') }}" method="post">
+    <label class="label" for="guest-name">Adicionar guest</label>
+    <div class="field has-addons">
+      <div class="control is-expanded">
+        <input
+          id="guest-name"
+          class="input"
+          name="name"
+          type="text"
+          autocomplete="off"
+          placeholder="Nome de quem vai cantar"
+          required
+        />
+      </div>
+      <div class="control">
+        <button class="button is-primary" type="submit">Adicionar</button>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section>
+  <h2 class="title is-5">Lista de guests</h2>
+  {% if guests %}
+  <div class="tags are-medium">
+    {% for guest in guests %}
+    <span class="tag is-dark">
+      {{ guest }}
+      <form action="{{ url_for('guests.delete_guest') }}" method="post" style="display: inline; margin-left: 0.45rem;">
+        <input type="hidden" name="name" value="{{ guest }}" />
+        <button class="delete is-small" type="submit" title="Remover {{ guest }}"></button>
+      </form>
+    </span>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="has-text-grey-light">Nenhum guest cadastrado ainda.</p>
+  {% endif %}
+</section>
+{% endblock %}

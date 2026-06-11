@@ -94,6 +94,33 @@ def test_prepare_enqueue_route_queues_playable_coach_asset():
     )
 
 
+def test_prepare_enqueue_route_accepts_multiple_singers():
+    app = Flask(__name__)
+    app.register_blueprint(prepare_bp)
+    client = app.test_client()
+
+    mock_karaoke = MagicMock()
+    mock_karaoke.coach_preparation.get_playable_track_asset.return_value = {
+        "path": "/songs/.biaoke-stems/song.instrumental.wav",
+        "title": "Artist - Song",
+        "using_instrumental": True,
+    }
+    mock_karaoke.queue_manager.enqueue.return_value = [True, "ok"]
+
+    with patch("biaoke.routes.prepare.get_karaoke_instance", return_value=mock_karaoke):
+        response = client.post(
+            "/prepare/enqueue",
+            json={"track_id": 7, "song_added_by": "Ana, Joao + Maria"},
+        )
+
+    assert response.status_code == 200
+    mock_karaoke.queue_manager.enqueue.assert_called_once_with(
+        "/songs/.biaoke-stems/song.instrumental.wav",
+        "Ana + Joao + Maria",
+        title="Artist - Song",
+    )
+
+
 def test_prepare_reanalyze_route_queues_track():
     app = Flask(__name__)
     app.register_blueprint(prepare_bp)

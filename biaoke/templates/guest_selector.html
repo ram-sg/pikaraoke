@@ -1,0 +1,24 @@
+<section class="guest-selection-panel">
+  <div class="is-flex is-justify-content-space-between is-align-items-center is-flex-wrap-wrap" style="gap: 0.5rem;">
+    <strong>Quem vai cantar?</strong>
+    <a class="is-size-7" href="{{ url_for('guests.guests') }}">Editar guests</a>
+  </div>
+  {% if guests %}
+  <div class="guest-checkboxes">
+    {% for guest in guests %}
+    <label class="checkbox">
+      <input class="guest-checkbox" type="checkbox" value="{{ guest }}" />
+      {{ guest }}
+    </label>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="has-text-grey-light is-size-7 mt-2 mb-2">Nenhum guest cadastrado.</p>
+  {% endif %}
+  <input
+    class="input guest-custom-input"
+    type="text"
+    autocomplete="off"
+    placeholder="Nome extra ou dupla, separados por virgula"
+  />
+</section>

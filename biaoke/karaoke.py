@@ -26,6 +26,7 @@ from biaoke.lib.get_platform import (
     get_platform,
     is_raspberry_pi,
 )
+from biaoke.lib.guest_manager import GuestManager
 from biaoke.lib.karaoke_database import KaraokeDatabase
 from biaoke.lib.library_scanner import LibraryScanner, ScanResult
 from biaoke.lib.network import get_ip
@@ -210,6 +211,7 @@ class Karaoke:
         self.song_manager = SongManager(
             self.download_path, db=self.db, get_title_tidy=lambda: self.enable_title_tidy
         )
+        self.guest_manager = GuestManager()
         self._scanner = LibraryScanner(self.db)
         self._sync_lock = threading.Lock()
 
@@ -568,10 +570,23 @@ class Karaoke:
 
         # Get playback state from PlaybackController
         playback_state = self.playback_controller.get_now_playing()
+        now_title = playback_state.get("now_playing")
+        now_user = playback_state.get("now_playing_user")
+        now_file = playback_state.get("now_playing_filename")
+        if (not now_title or now_title == now_user) and now_file:
+            now_title = self.song_manager.display_name_from_path(str(now_file))
+
+        next_title = None
+        if next_song:
+            next_title = next_song.get("title") or self.song_manager.display_name_from_path(
+                next_song["file"]
+            )
 
         return {
             **playback_state,
-            "up_next": next_song["title"] if next_song else None,
+            "now_playing_title": now_title,
+            "up_next": next_title,
+            "up_next_title": next_title,
             "next_user": next_song["user"] if next_song else None,
             "volume": self.volume,
         }

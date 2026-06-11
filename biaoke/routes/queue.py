@@ -17,6 +17,7 @@ from biaoke.lib.current_app import (
     get_site_name,
     is_admin,
 )
+from biaoke.lib.guest_manager import format_guest_names
 
 _ = flask_babel.gettext
 
@@ -190,6 +191,7 @@ def queue_edit(query):
 
 def _do_enqueue(song: str, user: str) -> str:
     k = get_karaoke_instance()
+    singer = format_guest_names(user, fallback="Biaoke")
     playable = None
     coach_track = k.coach_preparation.get_track_for_media_path(song)
     if coach_track and coach_track.get("status") == "ready":
@@ -198,7 +200,7 @@ def _do_enqueue(song: str, user: str) -> str:
     if playable:
         rc = k.queue_manager.enqueue(
             playable["path"],
-            user,
+            singer,
             title=playable["title"],
         )
         song_title = playable["title"]

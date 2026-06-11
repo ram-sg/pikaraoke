@@ -138,6 +138,7 @@
 
   // Generate now-playing row HTML
   function generateNowPlayingRow(np) {
+    var nowPlayingTitle = np.now_playing_title || np.now_playing;
     var iconSrc = np.is_paused
       ? '{{ url_for("static", filename="images/now-playing.png") }}'
       : '{{ url_for("static", filename="images/now-playing.gif") }}';
@@ -155,8 +156,8 @@
     html += '<div class="is-flex is-flex-wrap-wrap is-align-items-baseline">';
     html += '<span class="has-text-success">' + np.now_playing_user + '</span>';
     html += '<span class="is-hidden-mobile has-text-grey mx-2">&bull;</span>';
-    html += '<span class="has-text-weight-bold has-text-success is-hidden-mobile">' + np.now_playing + '</span>';
-    html += '<span class="is-size-7 has-text-weight-bold has-text-success is-hidden-tablet" style="width: 100%;">' + np.now_playing + '</span>';
+    html += '<span class="has-text-weight-bold has-text-success is-hidden-mobile">' + nowPlayingTitle + '</span>';
+    html += '<span class="is-size-7 has-text-weight-bold has-text-success is-hidden-tablet" style="width: 100%;">' + nowPlayingTitle + '</span>';
     html += '</div></td>';
 
     if (isAdmin) {
@@ -438,7 +439,7 @@
       var np = window.queuePageState.nowPlaying;
       if (!np || !np.now_playing) return;
 
-      $('#np-modal-song-title').text(np.now_playing);
+      $('#np-modal-song-title').text(np.now_playing_title || np.now_playing);
 
       // Update play/pause button based on current state
       if (np.is_paused) {

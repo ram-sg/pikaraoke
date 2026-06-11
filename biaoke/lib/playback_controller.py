@@ -225,6 +225,7 @@ class PlaybackController:
         """
         return {
             "now_playing": self.now_playing,
+            "now_playing_filename": self.now_playing_filename,
             "now_playing_user": self.now_playing_user,
             "now_playing_duration": self.now_playing_duration,
             "now_playing_transpose": self.now_playing_transpose,

@@ -3,6 +3,7 @@
 import pytest
 
 from biaoke.lib.events import EventSystem
+from biaoke.lib.guest_manager import GuestManager
 from biaoke.lib.preference_manager import PreferenceManager
 from biaoke.lib.queue_manager import QueueManager
 from biaoke.lib.song_manager import SongManager
@@ -49,6 +50,7 @@ class MockPlaybackController:
     def get_now_playing(self) -> dict:
         return {
             "now_playing": self.now_playing,
+            "now_playing_filename": self.now_playing_filename,
             "now_playing_user": self.now_playing_user,
             "now_playing_duration": self.now_playing_duration,
             "now_playing_transpose": self.now_playing_transpose,
@@ -66,7 +68,13 @@ class MockSongManager:
         self.songs = MockSongList(songs)
         self.download_path = "/fake/path"
 
-    filename_from_path = SongManager.filename_from_path
+    def filename_from_path(self, file_path: str, remove_youtube_id: bool = True, tidy: bool = True) -> str:
+        return SongManager.filename_from_path(
+            file_path, remove_youtube_id=remove_youtube_id, tidy=tidy
+        )
+
+    def display_name_from_path(self, file_path: str, remove_youtube_id: bool = True) -> str:
+        return SongManager.filename_from_path(file_path, remove_youtube_id=remove_youtube_id)
 
 
 class MockKaraoke:
@@ -84,6 +92,7 @@ class MockKaraoke:
             config_file_path=str(tmp_path / "config.ini"), target=self
         )
         self.playback_controller = MockPlaybackController()
+        self.guest_manager = GuestManager(tmp_path / "guests.json")
         self.volume = 0.85
         self.running = True
         self.now_playing_notification = None

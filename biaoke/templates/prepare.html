@@ -406,14 +406,13 @@
 
       $(document).off("click.prepare", ".queue-coach-button");
       $(document).on("click.prepare", ".queue-coach-button", function () {
-        setUserCookie();
         const button = $(this);
         postJson(
           button,
           enqueueUrl,
           {
             track_id: Number(button.data("track-id")),
-            song_added_by: getUserCookie() || "",
+            song_added_by: getSelectedSingers(this),
           },
           "Na fila",
           "Nao foi possivel adicionar"
@@ -511,6 +510,8 @@
       <input name="search_count" type="hidden" value="{{ search_count or 10 }}" />
     </form>
   </section>
+
+  {% include 'guest_selector.html' %}
 
   <section class="prepare-panel" id="prepare-processing-panel">
     <div class="prepare-panel-header">

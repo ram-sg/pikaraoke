@@ -97,6 +97,7 @@ class TestGetNowPlaying:
         assert result["now_playing_transpose"] == 2
         assert result["is_paused"] is False
         assert result["volume"] == 0.7
+        assert result["now_playing_title"] == "Test Song"
 
     def test_get_now_playing_with_queue(self, mock_karaoke):
         """Test now playing shows up_next from queue."""
@@ -105,7 +106,19 @@ class TestGetNowPlaying:
         result = mock_karaoke.get_now_playing()
 
         assert result["up_next"] == "Next Song"
+        assert result["up_next_title"] == "Next Song"
         assert result["next_user"] == "NextUser"
+
+    def test_get_now_playing_falls_back_to_filename_when_title_is_singer(self, mock_karaoke):
+        """Test that the stage can recover a title from the current filename."""
+        pc = mock_karaoke.playback_controller
+        pc.now_playing = "Ana"
+        pc.now_playing_user = "Ana"
+        pc.now_playing_filename = "/songs/Artist - Song---dQw4w9WgXcQ.mp4"
+
+        result = mock_karaoke.get_now_playing()
+
+        assert result["now_playing_title"] == "Artist - Song"
 
 
 class TestResetNowPlaying:

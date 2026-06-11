@@ -22,6 +22,13 @@ _ = flask_babel.gettext
 files_bp = Blueprint("files", __name__)
 
 
+def _guest_names(k) -> list[str]:
+    manager = getattr(k, "guest_manager", None)
+    if not manager or not callable(getattr(manager, "list_guests", None)):
+        return []
+    return manager.list_guests()
+
+
 class SongReferrerQuery(Schema):
     song = fields.String(required=True, metadata={"description": "Path to the song file"})
     referrer = fields.String(metadata={"description": "URL to redirect back to"})
@@ -112,6 +119,7 @@ def browse():
         songs=songs[start_index : start_index + results_per_page],
         admin=is_admin(),
         current_url=current_url,
+        guests=_guest_names(k),
     )
 
 

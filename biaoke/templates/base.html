@@ -109,6 +109,42 @@
       return Cookies.get("user");
     }
 
+    function normalizeSingerNames(rawNames) {
+      const seen = new Set();
+      const names = [];
+      (rawNames || []).forEach(function(rawName) {
+        const name = String(rawName || "").trim().replace(/\s+/g, " ");
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        names.push(name);
+      });
+      return names;
+    }
+
+    function getSelectedSingers(scope) {
+      const root = scope ? $(scope).closest(".content").find(".guest-selection-panel").first() : $(".guest-selection-panel").first();
+      const selected = [];
+      root.find(".guest-checkbox:checked").each(function() {
+        selected.push($(this).val());
+      });
+      const custom = root.find(".guest-custom-input").val() || "";
+      custom.split(/[,+;]/).forEach(function(name) {
+        selected.push(name);
+      });
+      const names = normalizeSingerNames(selected);
+      if (names.length) {
+        const label = names.join(" + ");
+        Cookies.set("user", label, { expires: 3650, path: '/' });
+        $("#current-user span").text(label);
+        $("#current-user").removeClass("is-hidden");
+        return label;
+      }
+      setUserCookie();
+      return getUserCookie() || "";
+    }
+
     $(function () {
       connectSocket();
 
@@ -132,6 +168,9 @@
       }
       if (currentPath == "/browse") {
         $("#browse").addClass("is-active")
+      }
+      if (currentPath == "/guests") {
+        $("#guests").addClass("is-active")
       }
       if (currentPath == "/info") {
         $("#info").addClass("is-active")
@@ -176,6 +215,26 @@
   }
   tr:nth-child(even) {
     background-color: rgb(50, 55, 55);
+  }
+  .guest-selection-panel {
+    border: 1px solid #2c3338;
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    background: #141719;
+  }
+  .guest-selection-panel .guest-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0.75rem;
+  }
+  .guest-selection-panel .checkbox {
+    margin-right: 0;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid #354047;
+    border-radius: 999px;
+    background: #101315;
   }
   @media screen and (max-width: 1088px) {
     .navbar-brand > .navbar-item > span {
@@ -223,6 +282,10 @@
           <i class="icon icon-folder-open-empty" title="Navegar"></i>
           {# MSG: Navigation link for the page where the user can add existing songs to the queue. #}
           <span>Navegar</span>
+        </a>
+        <a id="guests" class="navbar-item" href="{{ url_for('guests.guests') }}">
+          <i class="icon icon-mic-1" title="Guests"></i>
+          <span>Guests</span>
         </a>
         <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
           <span aria-hidden="true"></span>

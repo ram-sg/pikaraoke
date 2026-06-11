@@ -1552,8 +1552,10 @@
   }
 
   function updateSongChrome(np) {
+    const nowTitle = np.now_playing_title || np.now_playing || "--";
+    const nextTitle = np.up_next_title || np.up_next || "--";
     if (np.now_playing) {
-      setText("coach-now-playing-song", np.now_playing);
+      setText("coach-now-playing-song", nowTitle);
       setText("coach-now-playing-singer", np.now_playing_user || "--");
       setText("coach-idle-subtitle", "");
     } else {
@@ -1565,7 +1567,7 @@
     if (np.up_next) {
       els["coach-up-next"].classList.add("is-visible");
       els["coach-up-next"].classList.remove("is-empty");
-      setText("coach-up-next-song", np.up_next);
+      setText("coach-up-next-song", nextTitle);
       setText("coach-up-next-singer", np.next_user || "--");
     } else {
       els["coach-up-next"].classList.remove("is-visible");

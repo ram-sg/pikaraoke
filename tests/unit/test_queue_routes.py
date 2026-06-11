@@ -150,6 +150,32 @@ class TestBrowseCoachEnqueue:
 
     @patch("biaoke.routes.queue.broadcast_event")
     @patch("biaoke.routes.queue.get_karaoke_instance")
+    def test_enqueue_normalizes_multiple_singers(self, mock_get_instance, mock_broadcast, client):
+        mock_karaoke = MagicMock()
+        mock_karaoke.coach_preparation.get_track_for_media_path.return_value = {
+            "id": 7,
+            "status": "ready",
+            "display_title": "Artist - Song",
+        }
+        mock_karaoke.coach_preparation.get_playable_track_asset.return_value = {
+            "path": "/songs/.biaoke-stems/song.instrumental.wav",
+            "title": "Artist - Song",
+        }
+        mock_karaoke.queue_manager.enqueue.return_value = [True, "ok"]
+        mock_get_instance.return_value = mock_karaoke
+
+        response = client.get("/enqueue?song=/songs/song.mp4&user=Ana%2C%20Joao%20%2B%20Ana")
+
+        assert response.status_code == 200
+        mock_karaoke.queue_manager.enqueue.assert_called_once_with(
+            "/songs/.biaoke-stems/song.instrumental.wav",
+            "Ana + Joao",
+            title="Artist - Song",
+        )
+        mock_broadcast.assert_called_once_with("queue_update")
+
+    @patch("biaoke.routes.queue.broadcast_event")
+    @patch("biaoke.routes.queue.get_karaoke_instance")
     def test_enqueue_registers_unprepared_local_file(self, mock_get_instance, mock_broadcast, client):
         mock_karaoke = MagicMock()
         mock_karaoke.coach_preparation.get_track_for_media_path.return_value = None

@@ -40,6 +40,7 @@ from biaoke.routes.background_music import background_music_bp
 from biaoke.routes.batch_song_renamer import batch_song_renamer_bp
 from biaoke.routes.controller import controller_bp
 from biaoke.routes.files import files_bp
+from biaoke.routes.guests import guests_bp
 from biaoke.routes.home import home_bp
 from biaoke.routes.images import images_bp
 from biaoke.routes.info import info_bp
@@ -114,6 +115,7 @@ _internal_blueprints = [
     splash_bp,
     batch_song_renamer_bp,
     site_auth_bp,
+    guests_bp,
     score_bp,
 ]
 
