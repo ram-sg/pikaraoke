@@ -387,7 +387,10 @@
             song_added_by: getSelectedSingers(this),
           },
           "Na fila",
-          "Nao foi possivel preparar"
+          "Nao foi possivel preparar",
+          function () {
+            clearSelectedSingers(button);
+          }
         );
       });
 
@@ -414,7 +417,10 @@
             song_added_by: getSelectedSingers(this),
           },
           "Na fila",
-          "Nao foi possivel adicionar"
+          "Nao foi possivel adicionar",
+          function () {
+            clearSelectedSingers(button);
+          }
         );
       });
 

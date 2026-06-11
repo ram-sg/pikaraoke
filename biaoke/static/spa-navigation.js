@@ -83,7 +83,7 @@
         $(document).on('click', '#current-user', function(e) {
             e.preventDefault();
             // Get the current name from the cookie dynamically
-            let currentName = Cookies.get("user");
+            let currentName = (typeof getUserCookie === "function" ? getUserCookie() : Cookies.get("user")) || "";
             var promptMsg = (window.translations && window.translations.promptChangeUsername)
                 ? window.translations.promptChangeUsername.replace('CURRENT_NAME', currentName)
                 : "Do you want to change the name of the person using this device? This will show up on queued songs. Current: " + currentName;
@@ -91,9 +91,14 @@
             // Only update if user clicked OK and entered a non-empty name
             // null = Cancel clicked, "" = OK with empty input
             if (name !== null && name.trim() !== "") {
-                Cookies.set("user", name, { expires: 3650, path: '/' });
-                // Update the displayed name without reloading
-                $("#current-user span").text(name);
+                const cleanName = name.trim().replace(/\s+/g, " ");
+                if (typeof setHostUserCookie === "function") {
+                    setHostUserCookie(cleanName);
+                } else {
+                    Cookies.set(window.BIAOKE_HOST_USER_COOKIE || "biaoke_host_user", cleanName, { expires: 3650, path: '/' });
+                    Cookies.set("user", cleanName, { expires: 3650, path: '/' });
+                    $("#current-user span").text(cleanName);
+                }
             }
             // Remove focus from the link to prevent CSS focus styling (black background)
             $(this).blur();
