@@ -32,6 +32,7 @@ from biaoke.lib.get_platform import (
     has_js_runtime,
     is_windows,
 )
+from biaoke.lib.session_secret import load_flask_secret_key
 from biaoke.lib.song_manager import SongManager
 from biaoke.lib.youtube_dl import upgrade_youtubedl
 from biaoke.routes.admin import admin_bp
@@ -68,7 +69,7 @@ babel = Babel()
 
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = load_flask_secret_key()
 app.jinja_env.add_extension("jinja2.ext.i18n")
 app.config["BABEL_TRANSLATION_DIRECTORIES"] = "translations"
 app.config["JSON_SORT_KEYS"] = False

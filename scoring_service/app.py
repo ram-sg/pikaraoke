@@ -11,7 +11,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import gc
 from threading import Lock, Thread
+import time
 from typing import Any
 import unicodedata
 import wave
@@ -33,7 +35,12 @@ MEDIA_ROOT = Path(os.environ.get("BIAOKE_MEDIA_ROOT", "/app/biaoke-songs")).reso
 DEFAULT_DEMUCS_MODEL = "htdemucs"
 ALIGNMENT_MODEL_ENV = "BIAOKE_ALIGNMENT_MODEL"
 ALIGNMENT_DEVICE_ENV = "BIAOKE_ALIGNMENT_DEVICE"
+GPU_MODEL_IDLE_SECONDS_ENV = "BIAOKE_GPU_MODEL_IDLE_SECONDS"
+GPU_MODEL_IDLE_CHECK_SECONDS_ENV = "BIAOKE_GPU_MODEL_IDLE_CHECK_SECONDS"
+SCORING_WARMUP_ENV = "BIAOKE_SCORING_WARMUP"
 DEFAULT_ALIGNMENT_MODEL = "mms_fa"
+DEFAULT_GPU_MODEL_IDLE_SECONDS = 600
+DEFAULT_GPU_MODEL_IDLE_CHECK_SECONDS = 30
 SUPPORTED_ALIGNMENT_LANGUAGES = {"auto", "en", "es", "pt"}
 ALIGNMENT_MIN_OVERALL_CONFIDENCE = 0.18
 ALIGNMENT_LINE_WINDOW_LEAD_SECONDS = 0.35
@@ -45,6 +52,8 @@ ALIGNMENT_MIN_WINDOW_SECONDS = 0.4
 ALIGNMENT_MIN_LINE_CONFIDENCE = 0.16
 _ALIGNMENT_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
 _ALIGNMENT_LOCK = Lock()
+_TRANSCRIPTION_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
+_TRANSCRIPTION_LOCK = Lock()
 
 
 class StemSeparationRequest(BaseModel):
@@ -78,6 +87,179 @@ class LyricAlignmentRequest(BaseModel):
     model: str = DEFAULT_ALIGNMENT_MODEL
 
 
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name, "")).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _gpu_model_idle_seconds() -> int:
+    return max(0, _int_env(GPU_MODEL_IDLE_SECONDS_ENV, DEFAULT_GPU_MODEL_IDLE_SECONDS))
+
+
+def _gpu_model_idle_check_seconds() -> int:
+    return max(5, _int_env(GPU_MODEL_IDLE_CHECK_SECONDS_ENV, DEFAULT_GPU_MODEL_IDLE_CHECK_SECONDS))
+
+
+def _cache_acquire(
+    cache: dict[tuple, dict[str, Any]],
+    lock: Lock,
+    key: tuple,
+    *,
+    label: str,
+    factory,
+) -> Any:
+    with lock:
+        entry = cache.get(key)
+        if entry:
+            entry["in_use"] = int(entry.get("in_use") or 0) + 1
+            entry["last_used"] = time.monotonic()
+            return entry["payload"]
+
+        payload = factory()
+        cache[key] = {
+            "payload": payload,
+            "label": label,
+            "in_use": 1,
+            "last_used": time.monotonic(),
+        }
+        logging.info("Loaded GPU model cache entry: %s", label)
+        return payload
+
+
+def _cache_release(cache: dict[tuple, dict[str, Any]], lock: Lock, key: tuple) -> None:
+    should_evict = False
+    with lock:
+        entry = cache.get(key)
+        if not entry:
+            return
+        entry["in_use"] = max(0, int(entry.get("in_use") or 0) - 1)
+        entry["last_used"] = time.monotonic()
+        should_evict = entry["in_use"] == 0 and _gpu_model_idle_seconds() == 0
+    if should_evict:
+        _evict_idle_gpu_models(force=True)
+
+
+def _evict_cache(
+    cache: dict[tuple, dict[str, Any]],
+    lock: Lock,
+    *,
+    idle_seconds: int,
+    now: float,
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    evicted = []
+    with lock:
+        for key, entry in list(cache.items()):
+            if int(entry.get("in_use") or 0) > 0:
+                continue
+            if force or now - float(entry.get("last_used") or 0.0) >= idle_seconds:
+                evicted.append(cache.pop(key))
+    return evicted
+
+
+def _clear_gpu_memory() -> None:
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _evict_idle_gpu_models(*, force: bool = False) -> int:
+    idle_seconds = _gpu_model_idle_seconds()
+    if idle_seconds <= 0 and not force:
+        return 0
+    now = time.monotonic()
+    evicted = []
+    evicted.extend(
+        _evict_cache(
+            _TRANSCRIPTION_CACHE,
+            _TRANSCRIPTION_LOCK,
+            idle_seconds=idle_seconds,
+            now=now,
+            force=force,
+        )
+    )
+    evicted.extend(
+        _evict_cache(
+            _ALIGNMENT_CACHE,
+            _ALIGNMENT_LOCK,
+            idle_seconds=idle_seconds,
+            now=now,
+            force=force,
+        )
+    )
+    if not evicted:
+        return 0
+
+    labels = [str(entry.get("label") or "unknown") for entry in evicted]
+    for entry in evicted:
+        entry["payload"] = None
+    _clear_gpu_memory()
+    logging.info("Unloaded idle GPU model cache entries: %s", ", ".join(labels))
+    return len(evicted)
+
+
+def _gpu_model_idle_reaper() -> None:
+    while True:
+        time.sleep(_gpu_model_idle_check_seconds())
+        try:
+            _evict_idle_gpu_models()
+        except Exception as exc:
+            logging.warning("GPU model idle cleanup failed: %s", exc)
+
+
+def _model_cache_status() -> dict[str, Any]:
+    now = time.monotonic()
+
+    def summarize(cache: dict[tuple, dict[str, Any]], lock: Lock) -> list[dict[str, Any]]:
+        with lock:
+            return [
+                {
+                    "key": list(key),
+                    "label": entry.get("label"),
+                    "in_use": int(entry.get("in_use") or 0),
+                    "idle_seconds": round(max(0.0, now - float(entry.get("last_used") or now)), 1),
+                }
+                for key, entry in cache.items()
+            ]
+
+    return {
+        "idle_timeout_seconds": _gpu_model_idle_seconds(),
+        "transcription": summarize(_TRANSCRIPTION_CACHE, _TRANSCRIPTION_LOCK),
+        "alignment": summarize(_ALIGNMENT_CACHE, _ALIGNMENT_LOCK),
+    }
+
+
+def _get_transcription_model(model_name: str, device: str, compute_type: str):
+    def factory():
+        from faster_whisper import WhisperModel  # type: ignore
+
+        return WhisperModel(model_name, device=device, compute_type=compute_type)
+
+    key = (model_name, device, compute_type)
+    return key, _cache_acquire(
+        _TRANSCRIPTION_CACHE,
+        _TRANSCRIPTION_LOCK,
+        key,
+        label=f"faster-whisper:{model_name}:{device}:{compute_type}",
+        factory=factory,
+    )
+
+
 def _warm_up_scoring_engine() -> None:
     global _WARMED_UP
     try:
@@ -101,12 +283,24 @@ def _warm_up_scoring_engine() -> None:
 
 @app.on_event("startup")
 def startup() -> None:
-    Thread(target=_warm_up_scoring_engine, daemon=True).start()
+    Thread(target=_gpu_model_idle_reaper, daemon=True).start()
+    if _truthy(os.environ.get(SCORING_WARMUP_ENV)):
+        Thread(target=_warm_up_scoring_engine, daemon=True).start()
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "warmed_up": _WARMED_UP, **get_scoring_engine_status()}
+    return {
+        "ok": True,
+        "warmed_up": _WARMED_UP,
+        "model_cache": _model_cache_status(),
+        **get_scoring_engine_status(),
+    }
+
+
+@app.post("/models/unload")
+def unload_models():
+    return {"ok": True, "unloaded": _evict_idle_gpu_models(force=True), "model_cache": _model_cache_status()}
 
 
 @app.post("/analyze")
@@ -205,8 +399,9 @@ def transcribe(request: TranscriptRequest):
     model_name = _safe_transcription_model(request.model)
     device = _whisper_device()
     compute_type = "float16" if device == "cuda" else "int8"
+    cache_key = None
     try:
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        cache_key, model = _get_transcription_model(model_name, device, compute_type)
         segments, info = model.transcribe(
             str(input_path),
             language=request.language or None,
@@ -232,6 +427,9 @@ def transcribe(request: TranscriptRequest):
                 )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[-2000:]) from exc
+    finally:
+        if cache_key is not None:
+            _cache_release(_TRANSCRIPTION_CACHE, _TRANSCRIPTION_LOCK, cache_key)
 
     return {
         "status": "ready",
@@ -372,58 +570,77 @@ def _align_lyrics_with_mms_fa(
     *,
     language: str,
 ) -> dict[str, Any]:
-    context = _mms_alignment_context(_alignment_device())
-    waveform, sample_rate = _load_alignment_audio(input_path, context["sample_rate"])
-    duration_seconds = waveform.size(1) / sample_rate
-    if duration_seconds <= 0:
-        return _missing_alignment_payload(language, "empty_audio")
+    context_key, context = _mms_alignment_context(_alignment_device())
+    try:
+        waveform, sample_rate = _load_alignment_audio(input_path, context["sample_rate"])
+        duration_seconds = waveform.size(1) / sample_rate
+        if duration_seconds <= 0:
+            return _missing_alignment_payload(language, "empty_audio")
 
-    paint_units: list[dict[str, Any]] = []
-    total_words = 0
-    aligned_words = 0
-    aligned_lines = 0
-    confidence_values = []
-    for line_position, line in enumerate(lines[:600]):
-        line_index = line.line_index if line.line_index is not None else line_position
-        words = _alignment_words_for_text(line.text)
-        if not words:
-            continue
-        total_words += len(words)
+        paint_units: list[dict[str, Any]] = []
+        total_words = 0
+        aligned_words = 0
+        aligned_lines = 0
+        confidence_values = []
+        for line_position, line in enumerate(lines[:600]):
+            line_index = line.line_index if line.line_index is not None else line_position
+            words = _alignment_words_for_text(line.text)
+            if not words:
+                continue
+            total_words += len(words)
 
-        window = _alignment_window(line.start, line.end, duration_seconds, timing_source=line.timing_source)
-        if not window:
-            continue
-        units = _align_line_with_mms_fa(
-            context,
-            waveform,
-            sample_rate,
-            words,
-            window_start=window[0],
-            window_end=window[1],
-            line_index=int(line_index),
-        )
-        if not units:
-            continue
-        line_confidence = sum(float(unit.get("confidence") or 0.0) for unit in units) / len(units)
-        if line_confidence < ALIGNMENT_MIN_LINE_CONFIDENCE:
-            logging.debug(
-                "MMS forced alignment skipped line %s due to low confidence %.3f",
-                line_index,
-                line_confidence,
+            window = _alignment_window(line.start, line.end, duration_seconds, timing_source=line.timing_source)
+            if not window:
+                continue
+            units = _align_line_with_mms_fa(
+                context,
+                waveform,
+                sample_rate,
+                words,
+                window_start=window[0],
+                window_end=window[1],
+                line_index=int(line_index),
             )
-            continue
-        aligned_lines += 1
-        aligned_words += len(units)
-        confidence_values.extend(float(unit.get("confidence") or 0.0) for unit in units)
-        paint_units.extend(units)
+            if not units:
+                continue
+            line_confidence = sum(float(unit.get("confidence") or 0.0) for unit in units) / len(units)
+            if line_confidence < ALIGNMENT_MIN_LINE_CONFIDENCE:
+                logging.debug(
+                    "MMS forced alignment skipped line %s due to low confidence %.3f",
+                    line_index,
+                    line_confidence,
+                )
+                continue
+            aligned_lines += 1
+            aligned_words += len(units)
+            confidence_values.extend(float(unit.get("confidence") or 0.0) for unit in units)
+            paint_units.extend(units)
 
-    paint_units.sort(key=lambda unit: (int(unit.get("line_index", 0)), float(unit.get("start", 0.0))))
-    _normalize_alignment_unit_timeline(paint_units)
-    overall_confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
-    coverage = aligned_words / max(total_words, 1)
-    if not paint_units or overall_confidence < ALIGNMENT_MIN_OVERALL_CONFIDENCE:
+        paint_units.sort(key=lambda unit: (int(unit.get("line_index", 0)), float(unit.get("start", 0.0))))
+        _normalize_alignment_unit_timeline(paint_units)
+        overall_confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+        coverage = aligned_words / max(total_words, 1)
+        if not paint_units or overall_confidence < ALIGNMENT_MIN_OVERALL_CONFIDENCE:
+            return {
+                **_missing_alignment_payload(language, "low_alignment_confidence"),
+                "confidence": {
+                    "overall": round(overall_confidence, 3),
+                    "coverage": round(coverage, 3),
+                    "aligned_words": aligned_words,
+                    "total_words": total_words,
+                    "aligned_lines": aligned_lines,
+                },
+            }
+
         return {
-            **_missing_alignment_payload(language, "low_alignment_confidence"),
+            "status": "ready",
+            "engine": "torchaudio",
+            "model": "mms_fa",
+            "method": "mms_fa_forced_alignment",
+            "device": context["device"],
+            "language": language,
+            "granularity": "word",
+            "paint_units": paint_units,
             "confidence": {
                 "overall": round(overall_confidence, 3),
                 "coverage": round(coverage, 3),
@@ -432,32 +649,13 @@ def _align_lyrics_with_mms_fa(
                 "aligned_lines": aligned_lines,
             },
         }
-
-    return {
-        "status": "ready",
-        "engine": "torchaudio",
-        "model": "mms_fa",
-        "method": "mms_fa_forced_alignment",
-        "device": context["device"],
-        "language": language,
-        "granularity": "word",
-        "paint_units": paint_units,
-        "confidence": {
-            "overall": round(overall_confidence, 3),
-            "coverage": round(coverage, 3),
-            "aligned_words": aligned_words,
-            "total_words": total_words,
-            "aligned_lines": aligned_lines,
-        },
-    }
+    finally:
+        _cache_release(_ALIGNMENT_CACHE, _ALIGNMENT_LOCK, context_key)
 
 
-def _mms_alignment_context(device: str) -> dict[str, Any]:
+def _mms_alignment_context(device: str) -> tuple[tuple[str, str], dict[str, Any]]:
     key = ("mms_fa", device)
-    with _ALIGNMENT_LOCK:
-        cached = _ALIGNMENT_CACHE.get(key)
-        if cached:
-            return cached
+    def factory():
         try:
             import torchaudio  # type: ignore
         except Exception as exc:
@@ -465,7 +663,7 @@ def _mms_alignment_context(device: str) -> dict[str, Any]:
 
         bundle = torchaudio.pipelines.MMS_FA
         model = bundle.get_model().to(device).eval()
-        context = {
+        return {
             "bundle": bundle,
             "model": model,
             "tokenizer": bundle.get_tokenizer(),
@@ -473,8 +671,14 @@ def _mms_alignment_context(device: str) -> dict[str, Any]:
             "sample_rate": int(bundle.sample_rate),
             "device": device,
         }
-        _ALIGNMENT_CACHE[key] = context
-        return context
+
+    return key, _cache_acquire(
+        _ALIGNMENT_CACHE,
+        _ALIGNMENT_LOCK,
+        key,
+        label=f"mms_fa:{device}",
+        factory=factory,
+    )
 
 
 def _load_alignment_audio(input_path: Path, target_sample_rate: int):
